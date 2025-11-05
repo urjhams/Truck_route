@@ -131,7 +131,7 @@ def main():
     result = solve_tsp(dist, depot_index=0, return_to_depot=not args.no_return)
     if not result:
         raise SystemExit("Không tìm được lời giải.")
-
+    
     route = result["route_nodes"]
     total_m = result["total_distance_m"]
 
@@ -146,9 +146,11 @@ def main():
     if args.csv_out:
         with args.csv_out.open("w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["order", "name", "lat", "lng", "distance_to_next_m"])
+            writer.writerow(["order", "name", "lat", "lng", "distance_to_next_m (excluding return to depot)"])
             for i, node in enumerate(route):
-                if i < len(route) - 1:
+                if node == 0:
+                    continue  # skip depot
+                if i < len(route) - 1 and route[i+1] != 0:
                     nxt = route[i+1]
                     d = dist[node][nxt]
                 else:
