@@ -124,6 +124,13 @@ def main():
         if not required.issubset(s):
             raise SystemExit(f"Stop #{i} thiếu trường {required}.")
 
+    # Validate latitude and longitude ranges
+    for i, s in enumerate(stops):
+        lat, lng = s["lat"], s["lng"]
+        if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
+            raise SystemExit(f"Stop #{i} có toạ độ không hợp lệ: lat={lat}, lng={lng}. "
+                             "Giá trị hợp lệ: lat [-90,90], lng [-180,180].")
+
     # Ma trận khoảng cách
     dist = build_distance_matrix(stops)
 
