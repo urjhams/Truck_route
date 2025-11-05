@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QSpinBox,
+    QDoubleSpinBox,
     QSplitter,
     QTableView,
     QTableWidget,
@@ -463,7 +463,7 @@ class ItemView(BaseCrudView):
 class OrderLineEntry:
     customer: Customer
     item: Item
-    quantity: int
+    pallets: float
 
 
 class RouteCalculationWorker(QObject):
@@ -500,13 +500,15 @@ class OrderLineDialog(QDialog):
         for item in self.items:
             self.item_combo.addItem(item.name, item)
 
-        self.qty_spin = QSpinBox(self)
-        self.qty_spin.setRange(1, 100000)
-        self.qty_spin.setValue(1)
+        self.pallet_spin = QDoubleSpinBox(self)
+        self.pallet_spin.setDecimals(2)
+        self.pallet_spin.setSingleStep(0.25)
+        self.pallet_spin.setRange(0.1, 100000.0)
+        self.pallet_spin.setValue(1.0)
 
         form.addRow("Customer", self.customer_combo)
         form.addRow("Item", self.item_combo)
-        form.addRow("Quantity", self.qty_spin)
+        form.addRow("Pallets", self.pallet_spin)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, parent=self)
         buttons.accepted.connect(self.accept)
@@ -518,8 +520,8 @@ class OrderLineDialog(QDialog):
             return None
         customer = self.customer_combo.currentData()
         item = self.item_combo.currentData()
-        quantity = int(self.qty_spin.value())
-        return OrderLineEntry(customer=customer, item=item, quantity=quantity)
+        pallets = float(self.pallet_spin.value())
+        return OrderLineEntry(customer=customer, item=item, pallets=pallets)
 
 
 class OrderDialog(QDialog):
@@ -551,7 +553,7 @@ class OrderDialog(QDialog):
         form_layout.addRow("Warehouse", self.warehouse_combo)
 
         self.line_table = QTableWidget(0, 4, self)
-        self.line_table.setHorizontalHeaderLabels(["Customer", "Item", "Quantity", ""])
+        self.line_table.setHorizontalHeaderLabels(["Customer", "Item", "Pallets", ""])
         self.line_table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(QLabel("Order Lines"))
         layout.addWidget(self.line_table)
@@ -596,21 +598,55 @@ class OrderDialog(QDialog):
         self.route_thread: Optional[QThread] = None
         self.route_worker: Optional[RouteCalculationWorker] = None
 
+    @staticmethod
+    def _format_pallets(value: float) -> str:
+        text = f"{value:.2f}"
+        stripped = text.rstrip("0").rstrip(".")
+        return stripped if stripped else "0"
+
     def add_line(self):
         dialog = OrderLineDialog(self.customers, self.items, self)
         entry = dialog.get_line()
         if not entry:
             return
+        key = (entry.customer.id, entry.item.id)
+        existing_index: Optional[int] = None
+        for idx, line in enumerate(self.lines):
+            if (line.customer.id, line.item.id) == key:
+                existing_index = idx
+                break
 
-        self.lines.append(entry)
-        row = self.line_table.rowCount()
-        self.line_table.insertRow(row)
-        self.line_table.setItem(row, 0, QTableWidgetItem(entry.customer.name))
-        self.line_table.setItem(row, 1, QTableWidgetItem(entry.item.name))
-        self.line_table.setItem(row, 2, QTableWidgetItem(str(entry.quantity)))
-        remove_btn = QPushButton("Remove", self.line_table)
-        remove_btn.clicked.connect(lambda _, r=row: self._remove_line_at(r))
-        self.line_table.setCellWidget(row, 3, remove_btn)
+        if existing_index is not None:
+            self.lines[existing_index] = entry
+            self._update_line_row(existing_index, entry)
+        else:
+            self.lines.append(entry)
+            row = self.line_table.rowCount()
+            self.line_table.insertRow(row)
+            self.line_table.setItem(row, 0, QTableWidgetItem(entry.customer.name))
+            self.line_table.setItem(row, 1, QTableWidgetItem(entry.item.name))
+            self.line_table.setItem(row, 2, QTableWidgetItem(self._format_pallets(entry.pallets)))
+            remove_btn = QPushButton("Remove", self.line_table)
+            remove_btn.clicked.connect(lambda _, r=row: self._remove_line_at(r))
+            self.line_table.setCellWidget(row, 3, remove_btn)
+
+        self.route_list.clear()
+        self.export_button.setEnabled(False)
+        self.route_status_label.clear()
+        self.line_table.resizeColumnsToContents()
+
+    def _update_line_row(self, row: int, entry: OrderLineEntry) -> None:
+        values = [
+            entry.customer.name,
+            entry.item.name,
+            self._format_pallets(entry.pallets),
+        ]
+        for col, value in enumerate(values):
+            item = self.line_table.item(row, col)
+            if item is None:
+                self.line_table.setItem(row, col, QTableWidgetItem(value))
+            else:
+                item.setText(value)
 
     def _remove_line_at(self, row: int):
         if 0 <= row < len(self.lines):
@@ -761,7 +797,7 @@ class OrderDialog(QDialog):
                     lng=stop.lng,
                     distance_to_next_m=distance,
                     items_summary="; ".join(
-                        f"{line.item.name} x{line.quantity}"
+                        f"{line.item.name} x{self._format_pallets(line.pallets)}"
                         for line in lines_by_customer.get(customer.id, [])
                     )
                     if stop_idx != 0 and customer and customer.id is not None
@@ -817,7 +853,7 @@ class OrderDialog(QDialog):
                     order_id=0,
                     customer_id=entry.customer.id,
                     item_id=entry.item.id,
-                    qty=entry.quantity,
+                    pallets=entry.pallets,
                 )
             )
         return order, order_lines

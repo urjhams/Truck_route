@@ -8,7 +8,6 @@ from datetime import datetime
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
-from sqlalchemy.ext.declarative import declared_attr
 
 class Warehouse(SQLModel, table=True):
     __tablename__: str = "WAREHOUSES"
@@ -55,7 +54,7 @@ class OrderLine(SQLModel, table=True):
     order_id: int = Field(foreign_key="ORDERS.id", nullable=False)
     customer_id: int = Field(foreign_key="CUSTOMERS.id", nullable=False)
     item_id: int = Field(foreign_key="ITEMS.id", nullable=False)
-    qty: int = Field(default=0, nullable=False)
+    pallets: float = Field(default=0.0, nullable=False)
 
 
 __all__ = [
@@ -65,4 +64,3 @@ __all__ = [
     "Order",
     "OrderLine",
 ]  # Re-export models for convenience.
-
