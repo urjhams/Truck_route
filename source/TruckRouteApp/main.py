@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
 from TruckRouteApp.db import init_db
 from TruckRouteApp.logic.db_access import DatabaseService
 from TruckRouteApp.logic.export_excel import DEFAULT_TEMPLATE, RouteExcelRow, export_route_to_excel
-from TruckRouteApp.logic.routing_local import Stop, haversine_meters, optimise_route
+from TruckRouteApp.logic.routing_local import Stop, RouteResult, haversine_meters, optimise_route
 from TruckRouteApp.models.schema import Customer, Item, Order, OrderLine, Warehouse
 
 
@@ -103,6 +103,7 @@ class BaseCrudView(QWidget):
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setSortingEnabled(True)
+        self.table.doubleClicked.connect(self._on_double_clicked)
         self.model: SQLModelTableModel = None  # type: ignore
         self.main_layout.addWidget(self.table)
 
@@ -129,6 +130,15 @@ class BaseCrudView(QWidget):
         self.model = model
         self.table.setModel(model)
         self.table.resizeColumnsToContents()
+
+    def _on_double_clicked(self, index: QModelIndex) -> None:
+        if not index.isValid():
+            return
+        if hasattr(self, "edit"):
+            try:
+                getattr(self, "edit")()
+            except Exception as exc:
+                QMessageBox.critical(self, "Error", f"Unable to open editor: {exc}")
 
 
 class WarehouseDialog(QDialog):
@@ -456,6 +466,23 @@ class OrderLineEntry:
     quantity: int
 
 
+class RouteCalculationWorker(QObject):
+    finished = Signal(object, object)  # Tuple[Optional[RouteResult], Optional[BaseException]]
+
+    def __init__(self, stops: Sequence[Stop], return_to_depot: bool = True, parent=None):
+        super().__init__(parent)
+        self._stops = list(stops)
+        self._return_to_depot = return_to_depot
+
+    def run(self) -> None:
+        try:
+            result = optimise_route(self._stops, return_to_depot=self._return_to_depot)
+        except Exception as exc:  # propagate error to GUI thread
+            self.finished.emit(None, exc)
+            return
+        self.finished.emit(result, None)
+
+
 class OrderLineDialog(QDialog):
     def __init__(self, customers: Sequence[Customer], items: Sequence[Item], parent=None):
         super().__init__(parent)
@@ -541,6 +568,9 @@ class OrderDialog(QDialog):
         self.route_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         layout.addWidget(self.route_list)
 
+        self.route_status_label = QLabel("", self)
+        layout.addWidget(self.route_status_label)
+
         route_buttons = QHBoxLayout()
         layout.addLayout(route_buttons)
         self.estimate_button = QPushButton("Estimate route", self)
@@ -563,6 +593,8 @@ class OrderDialog(QDialog):
         self.route_order: List[int] = []  # customer IDs in the order list
         self.current_stops: List[Stop] = []
         self.stop_index_to_customer: dict[int, Customer] = {}
+        self.route_thread: Optional[QThread] = None
+        self.route_worker: Optional[RouteCalculationWorker] = None
 
     def add_line(self):
         dialog = OrderLineDialog(self.customers, self.items, self)
@@ -586,6 +618,7 @@ class OrderDialog(QDialog):
             self.line_table.removeRow(row)
         self.route_list.clear()
         self.export_button.setEnabled(False)
+        self.route_status_label.clear()
 
     def remove_line(self):
         row = self.line_table.currentRow()
@@ -609,6 +642,9 @@ class OrderDialog(QDialog):
         return stops
 
     def estimate_route(self):
+        if self.route_thread and self.route_thread.isRunning():
+            QMessageBox.information(self, "Route calculation", "A route calculation is already in progress.")
+            return
         try:
             stops = self._build_stops()
         except Exception as exc:
@@ -617,33 +653,70 @@ class OrderDialog(QDialog):
         if not stops:
             return
 
-        try:
-            result = optimise_route(stops, return_to_depot=True)
-        except Exception as exc:
-            QMessageBox.critical(self, "Routing error", str(exc))
-            return
-
         self.current_stops = stops
         self.route_list.clear()
         self.route_order = []
+        self.export_button.setEnabled(False)
+        self.estimate_button.setEnabled(False)
+        self.route_status_label.setText("Calculating route...")
+
+        worker = RouteCalculationWorker(stops, return_to_depot=True)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_route_finished)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_route_thread_finished)
+        self.route_worker = worker
+        self.route_thread = thread
+        thread.start()
+
+    def _on_route_finished(self, result: Optional[RouteResult], error: Optional[BaseException]) -> None:
+        self.route_worker = None
+        self.estimate_button.setEnabled(True)
+        if error or result is None:
+            message = str(error) if error else "Unable to compute route."
+            self.route_status_label.setText("Route calculation failed.")
+            QMessageBox.critical(self, "Routing error", message)
+            return
+
+        self._populate_route_list(result)
+        km = result.total_distance_m / 1000 if result.total_distance_m else 0
+        self.route_status_label.setText(f"Route ready — total distance ≈ {km:.2f} km")
+        self.export_button.setEnabled(True)
+
+    def _populate_route_list(self, result: RouteResult) -> None:
+        stops = self.current_stops
+        if not stops:
+            return
+        self.route_list.clear()
+        self.route_order = []
+
         for position, idx in enumerate(result.route_nodes):
             if position != 0 and idx == 0:
                 continue  # skip duplicate depot at the end
             stop = stops[idx]
             if idx == 0:
-                label = f"{stop.name} (Depot)"
-                item = QListWidgetItem(label)
+                item = QListWidgetItem(f"{stop.name} (Depot)")
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             else:
-                label = stop.name
-                item = QListWidgetItem(label)
+                item = QListWidgetItem(stop.name)
                 item.setData(Qt.ItemDataRole.UserRole, idx)
-                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsDragEnabled | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-            self.route_list.addItem(item)
-            if idx > 0:
+                item.setFlags(
+                    item.flags()
+                    | Qt.ItemFlag.ItemIsDragEnabled
+                    | Qt.ItemFlag.ItemIsEnabled
+                    | Qt.ItemFlag.ItemIsSelectable
+                )
                 self.route_order.append(idx)
+            self.route_list.addItem(item)
 
-        self.export_button.setEnabled(True)
+    def _on_route_thread_finished(self) -> None:
+        self.route_thread = None
+        if self.route_status_label.text() == "Calculating route...":
+            self.route_status_label.clear()
 
     def export_route(self):
         if self.route_list.count() <= 1:
