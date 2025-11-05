@@ -4,11 +4,12 @@ GUI entry point for the Truck Route desktop application.
 
 from __future__ import annotations
 
+import csv
 import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, Qt, QThread, Signal
 from PySide6.QtWidgets import (
@@ -141,6 +142,79 @@ class BaseCrudView(QWidget):
                 QMessageBox.critical(self, "Error", f"Unable to open editor: {exc}")
 
 
+class CSVMappingDialog(QDialog):
+    def __init__(
+        self,
+        headers: Sequence[str],
+        field_specs: Sequence[tuple[str, str, bool]],
+        parent: Optional[QWidget] = None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Map CSV Columns")
+        self._combos: Dict[str, QComboBox] = {}
+        self._required: Dict[str, bool] = {}
+        self._mapping: Dict[str, Optional[str]] = {}
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        for field, label, required in field_specs:
+            combo = QComboBox(self)
+            combo.addItem("<Skip>", "")
+            for header in headers:
+                combo.addItem(header, header)
+            self._combos[field] = combo
+            self._required[field] = required
+            display_label = f"{label}{' *' if required else ''}"
+            form.addRow(display_label, combo)
+            self._auto_select_default(combo, field, label, headers)
+
+        layout.addLayout(form)
+
+        note = QLabel("Select the CSV column for each field. Fields marked * are required.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, parent=self)
+        buttons.accepted.connect(self._handle_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _auto_select_default(self, combo: QComboBox, field: str, label: str, headers: Sequence[str]) -> None:
+        candidates = {
+            field.lower(),
+            label.lower(),
+            label.lower().replace(" ", "_"),
+        }
+        for index in range(1, combo.count()):
+            header = combo.itemText(index)
+            if header.lower() in candidates:
+                combo.setCurrentIndex(index)
+                return
+
+    def _handle_accept(self) -> None:
+        mapping: Dict[str, Optional[str]] = {}
+        used_columns: set[str] = set()
+        for field, combo in self._combos.items():
+            column = combo.currentData()
+            required = self._required[field]
+            if required and not column:
+                QMessageBox.warning(self, "Invalid mapping", f"Field '{field}' is required.")
+                return
+            if column:
+                if column in used_columns:
+                    QMessageBox.warning(self, "Invalid mapping", f"Column '{column}' is assigned multiple times.")
+                    return
+                used_columns.add(column)
+            mapping[field] = column or None
+        self._mapping = mapping
+        self.accept()
+
+    def get_mapping(self) -> Optional[Dict[str, Optional[str]]]:
+        if self.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return self._mapping
+
+
 class WarehouseDialog(QDialog):
     def __init__(self, warehouse: Optional[Warehouse] = None, parent=None):
         super().__init__(parent)
@@ -217,13 +291,18 @@ class CustomerDialog(QDialog):
         while True:
             if self.exec() != QDialog.DialogCode.Accepted:
                 return None
+            lat_text = self.lat_edit.text().strip()
+            lng_text = self.lng_edit.text().strip()
             try:
-                lat = float(self.lat_edit.text())
-                lng = float(self.lng_edit.text())
+                lat = float(lat_text) if lat_text else None
             except ValueError:
-                QMessageBox.warning(self, "Validation error", "Latitude and longitude must be numeric.")
+                QMessageBox.warning(self, "Validation error", "Latitude must be a numeric value.")
                 continue
-
+            try:
+                lng = float(lng_text) if lng_text else None
+            except ValueError:
+                QMessageBox.warning(self, "Validation error", "Longitude must be a numeric value.")
+                continue
             self.customer.name = self.name_edit.text()
             self.customer.address = self.address_edit.text()
             self.customer.lat = lat
@@ -347,8 +426,8 @@ class CustomerView(BaseCrudView):
         columns = [
             ColumnConfig("Name", lambda c: c.name),
             ColumnConfig("Address", lambda c: c.address or ""),
-            ColumnConfig("Latitude", lambda c: c.lat),
-            ColumnConfig("Longitude", lambda c: c.lng),
+            ColumnConfig("Latitude", lambda c: c.lat if c.lat is not None else ""),
+            ColumnConfig("Longitude", lambda c: c.lng if c.lng is not None else ""),
         ]
         self.model = SQLModelTableModel(columns, self)
         self.set_model(self.model)
@@ -358,6 +437,9 @@ class CustomerView(BaseCrudView):
         self.edit_button.clicked.connect(self.edit)
         self.delete_button.clicked.connect(self.delete)
         self.refresh_button.clicked.connect(self.refresh)
+        self.import_button = QPushButton("Import CSV", self)
+        self.button_bar.insertWidget(3, self.import_button)
+        self.import_button.clicked.connect(self.import_csv)
 
     def refresh(self):
         self.model.set_rows(self.db.list_customers())
@@ -399,6 +481,79 @@ class CustomerView(BaseCrudView):
             self.db.delete_customer(customer.id)
             self.refresh()
 
+    def import_csv(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import customers from CSV",
+            "",
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            with open(path, newline="", encoding="utf-8-sig") as fh:
+                reader = csv.DictReader(fh, delimiter=";")
+                headers = reader.fieldnames
+                if not headers:
+                    raise ValueError("CSV file must include a header row.")
+                mapping_dialog = CSVMappingDialog(
+                    headers,
+                    [
+                        ("name", "Name", True),
+                        ("address", "Address", False),
+                        ("lat", "Latitude", True),
+                        ("lng", "Longitude", True),
+                    ],
+                    self,
+                )
+                mapping = mapping_dialog.get_mapping()
+                if not mapping:
+                    return
+                name_col = mapping["name"]
+                address_col = mapping.get("address")
+                lat_col = mapping["lat"]
+                lng_col = mapping["lng"]
+                imported = 0
+                skipped = 0
+                errors: List[str] = []
+                for row_num, row in enumerate(reader, start=2):
+                    if not any(row.values()):
+                        continue
+                    try:
+                        name = (row.get(name_col) or "").strip()
+                        if not name:
+                            raise ValueError("missing name")
+                        lat = None
+                        lng = None
+                        if lat_col:
+                            lat_str = (row.get(lat_col) or "").strip()
+                            if lat_str:
+                                lat = float(lat_str)
+                        if lng_col:
+                            lng_str = (row.get(lng_col) or "").strip()
+                            if lng_str:
+                                lng = float(lng_str)
+                        address = (row.get(address_col) or "").strip() if address_col else ""
+                        customer = Customer(name=name, address=address or None, lat=lat, lng=lng)
+                        self.db.save_customer(customer)
+                        imported += 1
+                    except Exception as exc:  # noqa: BLE001
+                        skipped += 1
+                        errors.append(f"Row {row_num}: {exc}")
+                self.refresh()
+                summary = f"Imported {imported} customer(s)."
+                if skipped:
+                    summary += f" Skipped {skipped} row(s)."
+                if errors:
+                    details = "\n".join(errors[:5])
+                    if len(errors) > 5:
+                        details += "\n..."
+                    QMessageBox.warning(self, "Import completed with issues", summary + "\n\n" + details)
+                else:
+                    QMessageBox.information(self, "Import complete", summary)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Import error", str(exc))
+
 
 class ItemView(BaseCrudView):
     def __init__(self, db: DatabaseService, parent=None):
@@ -417,6 +572,9 @@ class ItemView(BaseCrudView):
         self.edit_button.clicked.connect(self.edit)
         self.delete_button.clicked.connect(self.delete)
         self.refresh_button.clicked.connect(self.refresh)
+        self.import_button = QPushButton("Import CSV", self)
+        self.button_bar.insertWidget(3, self.import_button)
+        self.import_button.clicked.connect(self.import_csv)
 
     def refresh(self):
         self.model.set_rows(self.db.list_items())
@@ -457,6 +615,76 @@ class ItemView(BaseCrudView):
         if confirm == QMessageBox.StandardButton.Yes:
             self.db.delete_item(item.id)
             self.refresh()
+
+    def import_csv(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import items from CSV",
+            "",
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            with open(path, newline="", encoding="utf-8-sig") as fh:
+                reader = csv.DictReader(fh, delimiter=";")
+                headers = reader.fieldnames
+                if not headers:
+                    raise ValueError("CSV file must include a header row.")
+                mapping_dialog = CSVMappingDialog(
+                    headers,
+                    [
+                        ("name", "Name", True),
+                        ("weight_per_ctn", "Weight per ctn", False),
+                        ("ctn_per_pallet", "Cartons per pallet", False),
+                    ],
+                    self,
+                )
+                mapping = mapping_dialog.get_mapping()
+                if not mapping:
+                    return
+                name_col = mapping["name"]
+                weight_col = mapping.get("weight_per_ctn")
+                ctn_col = mapping.get("ctn_per_pallet")
+                imported = 0
+                skipped = 0
+                errors: List[str] = []
+                for row_num, row in enumerate(reader, start=2):
+                    if not any(row.values()):
+                        continue
+                    try:
+                        name = (row.get(name_col) or "").strip()
+                        if not name:
+                            raise ValueError("missing name")
+                        weight = None
+                        if weight_col:
+                            weight_str = (row.get(weight_col) or "").strip()
+                            if weight_str:
+                                weight = float(weight_str)
+                        ctn = None
+                        if ctn_col:
+                            ctn_str = (row.get(ctn_col) or "").strip()
+                            if ctn_str:
+                                ctn = int(float(ctn_str))
+                        item = Item(name=name, weight_per_ctn=weight, ctn_per_pallet=ctn)
+                        self.db.save_item(item)
+                        imported += 1
+                    except Exception as exc:  # noqa: BLE001
+                        skipped += 1
+                        errors.append(f"Row {row_num}: {exc}")
+                self.refresh()
+                summary = f"Imported {imported} item(s)."
+                if skipped:
+                    summary += f" Skipped {skipped} row(s)."
+                if errors:
+                    details = "\n".join(errors[:5])
+                    if len(errors) > 5:
+                        details += "\n..."
+                    QMessageBox.warning(self, "Import completed with issues", summary + "\n\n" + details)
+                else:
+                    QMessageBox.information(self, "Import complete", summary)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Import error", str(exc))
 
 
 @dataclass
@@ -532,13 +760,29 @@ class OrderDialog(QDialog):
         self.resize(720, 500)
 
         self.warehouses = self.db.list_warehouses()
-        self.customers = self.db.list_customers()
+        self.customers_all = self.db.list_customers()
+        self.customers = [c for c in self.customers_all if c.lat is not None and c.lng is not None]
+        self.customers_missing_coords = [c for c in self.customers_all if c.lat is None or c.lng is None]
         self.items = self.db.list_items()
 
         if not self.warehouses:
             QMessageBox.warning(self, "Missing data", "Please create at least one warehouse first.")
-        if not self.customers:
+        if not self.customers_all:
             QMessageBox.warning(self, "Missing data", "Please create at least one customer first.")
+        elif not self.customers:
+            QMessageBox.warning(
+                self,
+                "Missing coordinates",
+                "No customers have latitude/longitude set. Please update customer records before creating an order.",
+            )
+        elif self.customers_missing_coords:
+            limited = ", ".join(c.name for c in self.customers_missing_coords[:5])
+            ellipsis = "..." if len(self.customers_missing_coords) > 5 else ""
+            QMessageBox.information(
+                self,
+                "Customers excluded",
+                f"The following customers are missing coordinates and cannot be added to this order: {limited}{ellipsis}",
+            )
         if not self.items:
             QMessageBox.warning(self, "Missing data", "Please create at least one item first.")
 
@@ -590,6 +834,7 @@ class OrderDialog(QDialog):
         self.remove_line_button.clicked.connect(self.remove_line)
         self.estimate_button.clicked.connect(self.estimate_route)
         self.export_button.clicked.connect(self.export_route)
+        self.add_line_button.setEnabled(bool(self.customers))
 
         self.lines: List[OrderLineEntry] = []
         self.route_order: List[int] = []  # customer IDs in the order list
@@ -605,6 +850,13 @@ class OrderDialog(QDialog):
         return stripped if stripped else "0"
 
     def add_line(self):
+        if not self.customers:
+            QMessageBox.warning(
+                self,
+                "No eligible customers",
+                "All customers are missing coordinates. Please update customer records before adding lines.",
+            )
+            return
         dialog = OrderLineDialog(self.customers, self.items, self)
         entry = dialog.get_line()
         if not entry:
@@ -673,8 +925,11 @@ class OrderDialog(QDialog):
             if entry.customer.id in seen_ids:
                 continue
             seen_ids.add(entry.customer.id)
-            stops.append(Stop(name=entry.customer.name, lat=entry.customer.lat, lng=entry.customer.lng))
-            self.stop_index_to_customer[len(stops) - 1] = entry.customer
+            customer = entry.customer
+            if customer.lat is None or customer.lng is None:
+                raise ValueError(f"Customer '{customer.name}' is missing latitude/longitude. Please update the customer before routing.")
+            stops.append(Stop(name=customer.name, lat=customer.lat, lng=customer.lng))
+            self.stop_index_to_customer[len(stops) - 1] = customer
         return stops
 
     def estimate_route(self):

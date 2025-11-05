@@ -26,8 +26,8 @@ class Customer(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(index=True, nullable=False)
     address: Optional[str] = Field(default=None)
-    lat: float = Field(nullable=False)
-    lng: float = Field(nullable=False)
+    lat: Optional[float] = Field(default=None, nullable=True)
+    lng: Optional[float] = Field(default=None, nullable=True)
 
 class Item(SQLModel, table=True):
     __tablename__: str = "ITEMS"

@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Iterator, Optional
 
 from sqlmodel import Session, SQLModel, create_engine
-from TruckRouteApp.models.schema import Customer, Item, Order, OrderLine, Warehouse
 
+from TruckRouteApp.models.schema import Customer, Item, Order, OrderLine, Warehouse
 
 def get_app_db_path() -> Path:
     """
@@ -51,6 +51,7 @@ def init_db(db_path: Optional[Path] = None) -> None:
     Create database tables if they do not already exist.
     """
     engine = get_engine(db_path)
+    _run_migrations(engine)
     SQLModel.metadata.create_all(engine)
 
 
@@ -62,6 +63,54 @@ def session_context(db_path: Optional[Path] = None) -> Iterator[Session]:
     engine = get_engine(db_path)
     with Session(engine) as session:
         yield session
+
+
+def _run_migrations(engine) -> None:
+    """
+    Apply simple, in-place migrations needed for legacy database files.
+    Currently ensures CUSTOMERS.lat/lng columns allow NULL values.
+    """
+    with engine.begin() as conn:
+        table_exists = conn.exec_driver_sql(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='CUSTOMERS';"
+        ).fetchone()
+        if not table_exists:
+            return
+
+        columns = conn.exec_driver_sql('PRAGMA table_info("CUSTOMERS");').fetchall()
+        # PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk
+        col_meta = {row[1].lower(): row for row in columns}
+        needs_migration = False
+        for key in ("lat", "lng"):
+            row = col_meta.get(key)
+            if row and row[3] == 1:  # notnull flag
+                needs_migration = True
+                break
+
+        if not needs_migration:
+            return
+
+        conn.exec_driver_sql("PRAGMA foreign_keys=off;")
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS __CUSTOMERS_NEW (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                address TEXT,
+                lat REAL,
+                lng REAL
+            );
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            INSERT INTO __CUSTOMERS_NEW (id, name, address, lat, lng)
+            SELECT id, name, address, lat, lng FROM CUSTOMERS;
+            """
+        )
+        conn.exec_driver_sql("DROP TABLE CUSTOMERS;")
+        conn.exec_driver_sql('ALTER TABLE __CUSTOMERS_NEW RENAME TO "CUSTOMERS";')
+        conn.exec_driver_sql("PRAGMA foreign_keys=on;")
 
 
 __all__ = [
