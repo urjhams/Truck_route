@@ -5,9 +5,9 @@ High level CRUD helpers built on top of SQLModel sessions.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import List, Optional, Sequence
+from typing import Generator, List, Optional, Sequence
 
-from sqlmodel import Session, select
+from sqlmodel import Session, select, desc
 
 from TruckRouteApp.db import DEFAULT_DB_PATH, session_context
 from TruckRouteApp.models.schema import Customer, Item, Order, OrderLine, Warehouse
@@ -22,14 +22,14 @@ class DatabaseService:
         self._db_path = db_path or DEFAULT_DB_PATH
 
     @contextmanager
-    def session(self) -> Session:
+    def session(self) -> Generator[Session, None, None]:
         with session_context(self._db_path) as session:
             yield session
 
     # --- Warehouses -----------------------------------------------------
     def list_warehouses(self) -> List[Warehouse]:
         with self.session() as session:
-            return session.exec(select(Warehouse).order_by(Warehouse.name)).all()
+            return list(session.exec(select(Warehouse).order_by(Warehouse.name)).all())
 
     def get_warehouse(self, warehouse_id: int) -> Optional[Warehouse]:
         with self.session() as session:
@@ -52,7 +52,7 @@ class DatabaseService:
     # --- Customers ------------------------------------------------------
     def list_customers(self) -> List[Customer]:
         with self.session() as session:
-            return session.exec(select(Customer).order_by(Customer.name)).all()
+            return list(session.exec(select(Customer).order_by(Customer.name)).all())
 
     def save_customer(self, customer: Customer) -> Customer:
         with self.session() as session:
@@ -71,7 +71,7 @@ class DatabaseService:
     # --- Items ----------------------------------------------------------
     def list_items(self) -> List[Item]:
         with self.session() as session:
-            return session.exec(select(Item).order_by(Item.name)).all()
+            return list(session.exec(select(Item).order_by(Item.name)).all())
 
     def save_item(self, item: Item) -> Item:
         with self.session() as session:
@@ -90,7 +90,7 @@ class DatabaseService:
     # --- Orders ---------------------------------------------------------
     def list_orders(self) -> List[Order]:
         with self.session() as session:
-            return session.exec(select(Order).order_by(Order.created_at.desc())).all()
+            return list(session.exec(select(Order).order_by(desc(Order.created_at))).all())
 
     def get_order(self, order_id: int) -> Optional[Order]:
         with self.session() as session:
@@ -104,6 +104,8 @@ class DatabaseService:
         with self.session() as session:
             session.add(order)
             session.flush()  # ensure order.id is available for lines
+            if order.id is None:
+                raise ValueError("Order ID is None after flush")
             for line in lines:
                 line.order_id = order.id
                 session.add(line)
@@ -113,9 +115,9 @@ class DatabaseService:
 
     def list_order_lines(self, order_id: int) -> List[OrderLine]:
         with self.session() as session:
-            return session.exec(
+            return list(session.exec(
                 select(OrderLine).where(OrderLine.order_id == order_id)
-            ).all()
+            ).all())
 
     def delete_order(self, order_id: int) -> None:
         with self.session() as session:

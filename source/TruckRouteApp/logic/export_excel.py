@@ -31,7 +31,10 @@ def _load_or_create_template(path: Path) -> Workbook:
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "Route"
+    if ws is None:
+        ws = wb.create_sheet("Route")
+    else:
+        ws.title = "Route"
     ws.append(
         [
             "Stop #",
@@ -60,6 +63,8 @@ def export_route_to_excel(
     template = template_path or DEFAULT_TEMPLATE
     workbook = _load_or_create_template(template)
     worksheet = workbook.active
+    if worksheet is None:
+        worksheet = workbook.create_sheet("Route")
 
     metadata = metadata or {}
     meta_start_row = 1

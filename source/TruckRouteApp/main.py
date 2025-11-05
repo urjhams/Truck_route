@@ -70,10 +70,10 @@ class SQLModelTableModel(QAbstractTableModel):
             return 0
         return len(self._columns)
 
-    def data(self, index: QModelIndex, role=Qt.DisplayRole):
+    def data(self, index: QModelIndex, role=Qt.ItemDataRole.DisplayRole):
         if not index.isValid():
             return None
-        if role in (Qt.DisplayRole, Qt.EditRole):
+        if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
             row = self._rows[index.row()]
             col = self._columns[index.column()]
             value = col.extractor(row)
@@ -82,10 +82,10 @@ class SQLModelTableModel(QAbstractTableModel):
             return value
         return None
 
-    def headerData(self, section, orientation, role=Qt.DisplayRole):
-        if role != Qt.DisplayRole:
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if role != Qt.ItemDataRole.DisplayRole:
             return None
-        if orientation == Qt.Horizontal:
+        if orientation == Qt.Orientation.Horizontal:
             return self._columns[section].header
         return section + 1
 
@@ -98,16 +98,16 @@ class SQLModelTableModel(QAbstractTableModel):
 class BaseCrudView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.layout = QVBoxLayout(self)
+        self.main_layout = QVBoxLayout(self)
         self.table = QTableView(self)
-        self.table.setSelectionBehavior(QTableView.SelectRows)
-        self.table.setSelectionMode(QTableView.SingleSelection)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setSortingEnabled(True)
-        self.model: Optional[SQLModelTableModel] = None
-        self.layout.addWidget(self.table)
+        self.model: SQLModelTableModel = None  # type: ignore
+        self.main_layout.addWidget(self.table)
 
         self.button_bar = QHBoxLayout()
-        self.layout.addLayout(self.button_bar)
+        self.main_layout.addLayout(self.button_bar)
 
         self.add_button = QPushButton("Add", self)
         self.edit_button = QPushButton("Edit", self)
@@ -153,26 +153,27 @@ class WarehouseDialog(QDialog):
         form.addRow("Latitude", self.lat_edit)
         form.addRow("Longitude", self.lng_edit)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, parent=self)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
 
     def get_data(self) -> Optional[Warehouse]:
-        if self.exec() != QDialog.Accepted:
-            return None
-        try:
-            lat = float(self.lat_edit.text())
-            lng = float(self.lng_edit.text())
-        except ValueError:
-            QMessageBox.warning(self, "Validation error", "Latitude and longitude must be numeric.")
-            return None
+        while True:
+            if self.exec() != QDialog.DialogCode.Accepted:
+                return None
+            try:
+                lat = float(self.lat_edit.text())
+                lng = float(self.lng_edit.text())
+            except ValueError:
+                QMessageBox.warning(self, "Validation error", "Latitude and longitude must be numeric.")
+                continue
 
-        self.warehouse.name = self.name_edit.text()
-        self.warehouse.address = self.address_edit.text()
-        self.warehouse.lat = lat
-        self.warehouse.lng = lng
-        return self.warehouse
+            self.warehouse.name = self.name_edit.text()
+            self.warehouse.address = self.address_edit.text()
+            self.warehouse.lat = lat
+            self.warehouse.lng = lng
+            return self.warehouse
 
 
 class CustomerDialog(QDialog):
@@ -197,26 +198,27 @@ class CustomerDialog(QDialog):
         form.addRow("Latitude", self.lat_edit)
         form.addRow("Longitude", self.lng_edit)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, parent=self)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
 
     def get_data(self) -> Optional[Customer]:
-        if self.exec() != QDialog.Accepted:
-            return None
-        try:
-            lat = float(self.lat_edit.text())
-            lng = float(self.lng_edit.text())
-        except ValueError:
-            QMessageBox.warning(self, "Validation error", "Latitude and longitude must be numeric.")
-            return None
+        while True:
+            if self.exec() != QDialog.DialogCode.Accepted:
+                return None
+            try:
+                lat = float(self.lat_edit.text())
+                lng = float(self.lng_edit.text())
+            except ValueError:
+                QMessageBox.warning(self, "Validation error", "Latitude and longitude must be numeric.")
+                continue
 
-        self.customer.name = self.name_edit.text()
-        self.customer.address = self.address_edit.text()
-        self.customer.lat = lat
-        self.customer.lng = lng
-        return self.customer
+            self.customer.name = self.name_edit.text()
+            self.customer.address = self.address_edit.text()
+            self.customer.lat = lat
+            self.customer.lng = lng
+            return self.customer
 
 
 class ItemDialog(QDialog):
@@ -239,31 +241,32 @@ class ItemDialog(QDialog):
         form.addRow("Weight per ctn", self.weight_edit)
         form.addRow("Ctn per pallet", self.ctn_edit)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, parent=self)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
 
     def get_data(self) -> Optional[Item]:
-        if self.exec() != QDialog.Accepted:
-            return None
+        while True:
+            if self.exec() != QDialog.DialogCode.Accepted:
+                return None
 
-        try:
-            weight = float(self.weight_edit.text()) if self.weight_edit.text() else None
-        except ValueError:
-            QMessageBox.warning(self, "Validation error", "Weight must be numeric.")
-            return None
+            try:
+                weight = float(self.weight_edit.text()) if self.weight_edit.text() else None
+            except ValueError:
+                QMessageBox.warning(self, "Validation error", "Weight must be numeric.")
+                continue
 
-        try:
-            ctn = int(self.ctn_edit.text()) if self.ctn_edit.text() else None
-        except ValueError:
-            QMessageBox.warning(self, "Validation error", "Cartons per pallet must be integer.")
-            return None
+            try:
+                ctn = int(self.ctn_edit.text()) if self.ctn_edit.text() else None
+            except ValueError:
+                QMessageBox.warning(self, "Validation error", "Cartons per pallet must be integer.")
+                continue
 
-        self.item.name = self.name_edit.text()
-        self.item.weight_per_ctn = weight
-        self.item.ctn_per_pallet = ctn
-        return self.item
+            self.item.name = self.name_edit.text()
+            self.item.weight_per_ctn = weight
+            self.item.ctn_per_pallet = ctn
+            return self.item
 
 
 class WarehouseView(BaseCrudView):
@@ -276,14 +279,15 @@ class WarehouseView(BaseCrudView):
             ColumnConfig("Latitude", lambda w: w.lat),
             ColumnConfig("Longitude", lambda w: w.lng),
         ]
-        self.model = SQLModelTableModel(columns, self)
-        self.set_model(self.model)
-        self.refresh()
+        model = SQLModelTableModel(columns, self)
+        self.set_model(model)
 
         self.add_button.clicked.connect(self.add)
         self.edit_button.clicked.connect(self.edit)
         self.delete_button.clicked.connect(self.delete)
         self.refresh_button.clicked.connect(self.refresh)
+        
+        self.refresh()
 
     def refresh(self):
         self.model.set_rows(self.db.list_warehouses())
@@ -300,7 +304,9 @@ class WarehouseView(BaseCrudView):
         index = self.selected_index()
         if not index:
             return
-        warehouse: Warehouse = self.model.get_row(index)
+        warehouse: Optional[Warehouse] = self.model.get_row(index)
+        if not warehouse:
+            return
         dialog = WarehouseDialog(warehouse=warehouse, parent=self)
         data = dialog.get_data()
         if data:
@@ -309,15 +315,17 @@ class WarehouseView(BaseCrudView):
 
     def delete(self):
         index = self.selected_index()
-        if not index:
+        if not index or not self.model:
             return
-        warehouse: Warehouse = self.model.get_row(index)
+        warehouse = self.model.get_row(index)
+        if not warehouse:
+            return
         confirm = QMessageBox.question(
             self,
             "Delete warehouse",
             f"Delete warehouse '{warehouse.name}'?",
         )
-        if confirm == QMessageBox.Yes:
+        if confirm == QMessageBox.StandardButton.Yes:
             self.db.delete_warehouse(warehouse.id)
             self.refresh()
 
@@ -356,7 +364,9 @@ class CustomerView(BaseCrudView):
         index = self.selected_index()
         if not index:
             return
-        customer: Customer = self.model.get_row(index)
+        customer: Optional[Customer] = self.model.get_row(index)
+        if not customer:
+            return
         dialog = CustomerDialog(customer=customer, parent=self)
         data = dialog.get_data()
         if data:
@@ -367,13 +377,15 @@ class CustomerView(BaseCrudView):
         index = self.selected_index()
         if not index:
             return
-        customer: Customer = self.model.get_row(index)
+        customer: Optional[Customer] = self.model.get_row(index)
+        if not customer:
+            return
         confirm = QMessageBox.question(
             self,
             "Delete customer",
             f"Delete customer '{customer.name}'?",
         )
-        if confirm == QMessageBox.Yes:
+        if confirm == QMessageBox.StandardButton.Yes:
             self.db.delete_customer(customer.id)
             self.refresh()
 
@@ -411,7 +423,9 @@ class ItemView(BaseCrudView):
         index = self.selected_index()
         if not index:
             return
-        item: Item = self.model.get_row(index)
+        item: Optional[Item] = self.model.get_row(index)
+        if not item:
+            return
         dialog = ItemDialog(item=item, parent=self)
         data = dialog.get_data()
         if data:
@@ -422,13 +436,15 @@ class ItemView(BaseCrudView):
         index = self.selected_index()
         if not index:
             return
-        item: Item = self.model.get_row(index)
+        item: Optional[Item] = self.model.get_row(index)
+        if not item:
+            return
         confirm = QMessageBox.question(
             self,
             "Delete item",
             f"Delete item '{item.name}'?",
         )
-        if confirm == QMessageBox.Yes:
+        if confirm == QMessageBox.StandardButton.Yes:
             self.db.delete_item(item.id)
             self.refresh()
 
@@ -465,13 +481,13 @@ class OrderLineDialog(QDialog):
         form.addRow("Item", self.item_combo)
         form.addRow("Quantity", self.qty_spin)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, parent=self)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
 
     def get_line(self) -> Optional[OrderLineEntry]:
-        if self.exec() != QDialog.Accepted:
+        if self.exec() != QDialog.DialogCode.Accepted:
             return None
         customer = self.customer_combo.currentData()
         item = self.item_combo.currentData()
@@ -522,7 +538,7 @@ class OrderDialog(QDialog):
 
         layout.addWidget(QLabel("Route preview (drag to reorder)"))
         self.route_list = QListWidget(self)
-        self.route_list.setDragDropMode(QAbstractItemView.InternalMove)
+        self.route_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         layout.addWidget(self.route_list)
 
         route_buttons = QHBoxLayout()
@@ -533,7 +549,7 @@ class OrderDialog(QDialog):
         route_buttons.addWidget(self.estimate_button)
         route_buttons.addWidget(self.export_button)
 
-        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
+        self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, parent=self)
         layout.addWidget(self.button_box)
 
         self.button_box.accepted.connect(self.accept)
@@ -617,12 +633,12 @@ class OrderDialog(QDialog):
             if idx == 0:
                 label = f"{stop.name} (Depot)"
                 item = QListWidgetItem(label)
-                item.setFlags(Qt.ItemIsEnabled)
+                item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             else:
                 label = stop.name
                 item = QListWidgetItem(label)
-                item.setData(Qt.UserRole, idx)
-                item.setFlags(item.flags() | Qt.ItemIsDragEnabled | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                item.setData(Qt.ItemDataRole.UserRole, idx)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsDragEnabled | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             self.route_list.addItem(item)
             if idx > 0:
                 self.route_order.append(idx)
@@ -641,7 +657,7 @@ class OrderDialog(QDialog):
         ordered_customer_indices = []
         for row in range(self.route_list.count()):
             item = self.route_list.item(row)
-            idx = item.data(Qt.UserRole)
+            idx = item.data(Qt.ItemDataRole.UserRole)
             if idx and idx != 0:
                 ordered_customer_indices.append(idx)
 
@@ -649,7 +665,9 @@ class OrderDialog(QDialog):
         rows: List[RouteExcelRow] = []
         lines_by_customer: dict[int, List[OrderLineEntry]] = {}
         for entry in self.lines:
-            lines_by_customer.setdefault(entry.customer.id, []).append(entry)
+            id = entry.customer.id
+            if id:
+                lines_by_customer.setdefault(id, []).append(entry)
         for position, stop_idx in enumerate(ordered_indices):
             stop = stops[stop_idx]
             next_idx = ordered_indices[(position + 1) % len(ordered_indices)]
@@ -673,7 +691,7 @@ class OrderDialog(QDialog):
                         f"{line.item.name} x{line.quantity}"
                         for line in lines_by_customer.get(customer.id, [])
                     )
-                    if stop_idx != 0 and customer
+                    if stop_idx != 0 and customer and customer.id is not None
                     else "",
                 )
             )
@@ -711,13 +729,16 @@ class OrderDialog(QDialog):
         super().accept()
 
     def get_payload(self) -> Optional[tuple[Order, List[OrderLine]]]:
-        if self.exec() != QDialog.Accepted:
+        if self.exec() != QDialog.DialogCode.Accepted:
             return None
 
         warehouse: Warehouse = self.warehouse_combo.currentData()
+        assert warehouse.id is not None
         order = Order(warehouse_id=warehouse.id)
         order_lines: List[OrderLine] = []
         for entry in self.lines:
+            assert entry.customer.id is not None
+            assert entry.item.id is not None
             order_lines.append(
                 OrderLine(
                     order_id=0,
@@ -770,13 +791,15 @@ class OrderView(BaseCrudView):
         index = self.selected_index()
         if not index:
             return
-        order: Order = self.model.get_row(index)
+        order = self.model.get_row(index)
+        if not order:
+            return
         confirm = QMessageBox.question(
             self,
             "Delete order",
             f"Delete order #{order.id}?",
         )
-        if confirm == QMessageBox.Yes:
+        if confirm == QMessageBox.StandardButton.Yes:
             self.db.delete_order(order.id)
             self.refresh()
 
@@ -789,7 +812,7 @@ class MainWindow(QMainWindow):
         self.resize(1100, 700)
 
         splitter = QSplitter(self)
-        splitter.setOrientation(Qt.Horizontal)
+        splitter.setOrientation(Qt.Orientation.Horizontal)
 
         self.nav_list = QListWidget(self)
         self.nav_list.addItem("Warehouses")
