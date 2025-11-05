@@ -4,24 +4,42 @@ SQLite bootstrap utilities.
 
 from __future__ import annotations
 
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Optional
 
 from sqlmodel import Session, SQLModel, create_engine
-
 from TruckRouteApp.models.schema import Customer, Item, Order, OrderLine, Warehouse
 
-# Default location for the SQLite database. The file is created lazily.
-DEFAULT_DB_PATH = Path(__file__).resolve().parent / "truckroute.db"
+
+def get_app_db_path() -> Path:
+    """
+    Return the correct writable path for the SQLite DB depending on environment:
+    - When frozen (PyInstaller exe/app), use OS-specific app data directory.
+    - When running from source, use local db/ folder next to source files.
+    """
+    if getattr(sys, "frozen", False):  # Bundled app
+        base = Path.home()
+        if sys.platform == "darwin":
+            base = base / "Library" / "Application Support" / "TruckRoute"
+        elif sys.platform == "win32":
+            base = base / "AppData" / "Roaming" / "TruckRoute"
+        else:
+            base = base / ".local" / "share" / "TruckRoute"
+        return base / "truckroute.db"
+    else:
+        # Dev mode: local db folder inside repo
+        return Path(__file__).resolve().parent / "truckroute.db"
+
+
+DEFAULT_DB_PATH = get_app_db_path()
 
 
 def get_engine(db_path: Optional[Path] = None):
     """
-    Return a SQLAlchemy engine bound to the local SQLite database.
-
-    The function ensures the parent directory exists so the database file can be
-    created on first use.
+    Return a SQLAlchemy engine bound to the SQLite database.
+    Ensures the parent directory exists.
     """
     path = db_path or DEFAULT_DB_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -39,7 +57,7 @@ def init_db(db_path: Optional[Path] = None) -> None:
 @contextmanager
 def session_context(db_path: Optional[Path] = None) -> Iterator[Session]:
     """
-    Context manager yielding a SQLModel session bound to the application engine.
+    Context manager yielding a SQLModel session bound to the app engine.
     """
     engine = get_engine(db_path)
     with Session(engine) as session:
@@ -51,11 +69,9 @@ __all__ = [
     "get_engine",
     "init_db",
     "session_context",
-    # Explicitly import models to make them available through this module.
     "Warehouse",
     "Customer",
     "Item",
     "Order",
     "OrderLine",
 ]
-
