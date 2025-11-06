@@ -166,9 +166,10 @@ class DatabaseService:
         existing_ids = session.exec(stmt).all()
         max_suffix = 0
         for value in existing_ids:
-            suffix = value[len(prefix):]
-            if suffix.isdigit():
-                max_suffix = max(max_suffix, int(suffix))
+            if value is not None and isinstance(value, str) and value.startswith(prefix):
+                suffix = value[len(prefix):]
+                if suffix.isdigit():
+                    max_suffix = max(max_suffix, int(suffix))
         return f"{prefix}{max_suffix + 1}"
 
 
