@@ -73,6 +73,7 @@ def _run_migrations(engine) -> None:
         _ensure_customers_lat_lng_nullable(conn)
         _ensure_items_optional_columns(conn)
         _ensure_order_lines_item_id_text(conn)
+        _ensure_orders_id_text(conn)
 
 
 def _ensure_customers_lat_lng_nullable(conn) -> None:
@@ -233,6 +234,43 @@ def _ensure_order_lines_item_id_text(conn) -> None:
     )
     conn.exec_driver_sql("DROP TABLE ORDER_LINES;")
     conn.exec_driver_sql('ALTER TABLE __ORDER_LINES_NEW RENAME TO "ORDER_LINES";')
+    conn.exec_driver_sql("PRAGMA foreign_keys=on;")
+
+
+def _ensure_orders_id_text(conn) -> None:
+    table_exists = conn.exec_driver_sql(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='ORDERS';"
+    ).fetchone()
+    if not table_exists:
+        return
+
+    columns = conn.exec_driver_sql('PRAGMA table_info("ORDERS");').fetchall()
+    col_meta = {row[1].lower(): row for row in columns}
+    id_meta = col_meta.get("id")
+    if not id_meta:
+        return
+    if (id_meta[2] or "").upper() == "TEXT":
+        return
+
+    conn.exec_driver_sql("PRAGMA foreign_keys=off;")
+    conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS __ORDERS_NEW (
+            id TEXT PRIMARY KEY,
+            warehouse_id INTEGER REFERENCES WAREHOUSES(id),
+            created_at TEXT
+        );
+        """
+    )
+    conn.exec_driver_sql(
+        """
+        INSERT INTO __ORDERS_NEW (id, warehouse_id, created_at)
+        SELECT CAST(id AS TEXT), warehouse_id, created_at
+        FROM ORDERS;
+        """
+    )
+    conn.exec_driver_sql("DROP TABLE ORDERS;")
+    conn.exec_driver_sql('ALTER TABLE __ORDERS_NEW RENAME TO "ORDERS";')
     conn.exec_driver_sql("PRAGMA foreign_keys=on;")
 
 

@@ -45,7 +45,7 @@ class Order(SQLModel, table=True):
     __tablename__: str = "ORDERS"
     __tablename__ = "ORDERS"
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: Optional[str] = Field(default=None, primary_key=True)
     warehouse_id: int = Field(foreign_key="WAREHOUSES.id", nullable=False)
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
 
@@ -54,7 +54,7 @@ class OrderLine(SQLModel, table=True):
     __tablename__ = "ORDER_LINES"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    order_id: int = Field(foreign_key="ORDERS.id", nullable=False)
+    order_id: str = Field(foreign_key="ORDERS.id", nullable=False)
     customer_id: str = Field(foreign_key="CUSTOMERS.id", nullable=False)
     item_id: str = Field(foreign_key="ITEMS.id", nullable=False)
     pallets: float = Field(default=0.0, nullable=False)

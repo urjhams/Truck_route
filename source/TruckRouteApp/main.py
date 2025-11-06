@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, Qt, QThread, Signal
+from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -889,6 +890,7 @@ class OrderLineEntry:
     customer: Customer
     item: Item
     pallets: float
+    ktn_per_pal: Optional[float] = None
 
 
 class RouteCalculationWorker(QObject):
@@ -915,34 +917,51 @@ class RouteCalculationWorker(QObject):
 
 
 class OrderLineDialog(QDialog):
-    """Collects a single order line, allowing user to pick customer/item/pallets."""
+    """Collect one or more order lines for a single customer in one shot."""
 
     def __init__(self, customers: Sequence[Customer], items: Sequence[Item], parent=None):
         super().__init__(parent)
         self.setWindowTitle("Add Line")
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(560)
         self.customers = list(customers)
         self.items = list(items)
-        self.selected: Optional[OrderLineEntry] = None
+        self.selected_lines: List[OrderLineEntry] = []
+        self._item_rows: List[dict[str, object]] = []
 
-        form = QFormLayout(self)
+        layout = QVBoxLayout(self)
+
+        form = QFormLayout()
+        layout.addLayout(form)
         self.customer_combo = QComboBox(self)
         for customer in self.customers:
             self.customer_combo.addItem(customer.name, customer)
         self.customer_combo.setMinimumWidth(260)
-
-        self.item_combo = QComboBox(self)
-        for item in self.items:
-            self.item_combo.addItem(item.name, item)
-        self.item_combo.setMinimumWidth(260)
-        self.item_combo.currentIndexChanged.connect(self._apply_placeholder)
-
-        self.pallet_input = QLineEdit(self)
-        self.pallet_input.setMinimumWidth(160)
-
         form.addRow("Customer", self.customer_combo)
-        form.addRow("Item", self.item_combo)
-        form.addRow("Karton pro Pal", self.pallet_input)
+
+        layout.addWidget(QLabel("Products"))
+        header_layout = QHBoxLayout()
+        for title, stretch in (("Product", 3), ("Pallets", 1), ("Karton/Pal", 1)):
+            label = QLabel(title, self)
+            label.setStyleSheet("font-weight: 600;")
+            if title == "Karton/Pal":
+                label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            header_layout.addWidget(label, stretch)
+        layout.addLayout(header_layout)
+
+        self.items_layout = QVBoxLayout()
+        layout.addLayout(self.items_layout)
+
+        controls = QHBoxLayout()
+        controls.addStretch()
+        self.add_item_button = QPushButton("+", self)
+        self.add_item_button.setFixedWidth(32)
+        self.add_item_button.clicked.connect(self._add_item_row)
+        self.remove_item_button = QPushButton("-", self)
+        self.remove_item_button.setFixedWidth(32)
+        self.remove_item_button.clicked.connect(self._remove_item_row)
+        controls.addWidget(self.add_item_button)
+        controls.addWidget(self.remove_item_button)
+        layout.addLayout(controls)
 
         self.button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
@@ -950,54 +969,159 @@ class OrderLineDialog(QDialog):
         )
         self.button_box.accepted.connect(self._handle_accept)
         self.button_box.rejected.connect(self.reject)
-        form.addRow(self.button_box)
+        layout.addWidget(self.button_box)
 
-        self._apply_placeholder()
+        self._add_item_row()
+        self._update_remove_button_state()
 
-    def _current_item(self) -> Optional[Item]:
-        return self.item_combo.currentData()
+    def _add_item_row(self) -> None:
+        row_widget = QWidget(self)
+        row_layout = QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(12)
 
-    def _apply_placeholder(self) -> None:
-        item = self._current_item()
+        item_combo = QComboBox(row_widget)
+        for item in self.items:
+            item_combo.addItem(item.name, item)
+        item_combo.setMinimumWidth(220)
+
+        pallets_input = QLineEdit(row_widget)
+        pallets_input.setPlaceholderText("Number of pallets")
+        pallets_input.setMinimumWidth(120)
+        validator = QDoubleValidator(0.0, 999999.0, 3, pallets_input)
+        validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+        pallets_input.setValidator(validator)
+
+        karton_input = QLineEdit(row_widget)
+        karton_input.setPlaceholderText("Karton per pallet")
+        karton_input.setMinimumWidth(120)
+        karton_validator = QDoubleValidator(0.0, 999999.0, 3, karton_input)
+        karton_validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+        karton_input.setValidator(karton_validator)
+
+        row_layout.addWidget(item_combo, 3)
+        row_layout.addWidget(pallets_input, 1)
+        row_layout.addWidget(karton_input, 1)
+        self.items_layout.addWidget(row_widget)
+
+        row = {
+            "widget": row_widget,
+            "item_combo": item_combo,
+            "pallet_input": pallets_input,
+            "karton_input": karton_input,
+        }
+        self._item_rows.append(row)
+        item_combo.currentIndexChanged.connect(lambda _: self._update_row_karton(row))
+        self._update_row_karton(row)
+        self._update_remove_button_state()
+
+    def _remove_item_row(self) -> None:
+        if len(self._item_rows) <= 1:
+            return
+        row = self._item_rows.pop()
+        widget: QWidget = row["widget"]  # type: ignore[assignment]
+        widget.setParent(None)
+        widget.deleteLater()
+        self._update_remove_button_state()
+
+    def _update_remove_button_state(self) -> None:
+        self.remove_item_button.setEnabled(len(self._item_rows) > 1)
+
+    def _update_row_karton(self, row: dict[str, object]) -> None:
+        item_combo: QComboBox = row["item_combo"]  # type: ignore[assignment]
+        karton_input: QLineEdit = row["karton_input"]  # type: ignore[assignment]
+        item: Optional[Item] = item_combo.currentData()
         if item and item.ktn_per_pal is not None:
-            self.pallet_input.setPlaceholderText(str(item.ktn_per_pal))
+            karton_input.setPlaceholderText(str(item.ktn_per_pal))
         else:
-            self.pallet_input.setPlaceholderText("")
-        self.pallet_input.clear()
+            karton_input.setPlaceholderText("")
 
     def _handle_accept(self) -> None:
         customer = self.customer_combo.currentData()
-        item = self._current_item()
-        if customer is None or item is None:
-            QMessageBox.warning(self, "Missing selection", "Please choose both a customer and an item.")
+        if customer is None:
+            QMessageBox.warning(self, "Missing selection", "Please choose a customer.")
+            return
+        if not self._item_rows:
+            QMessageBox.warning(self, "Missing items", "Add at least one product line.")
             return
 
-        text_value = self.pallet_input.text().strip()
-        if not text_value:
-            default_value = item.ktn_per_pal
-            if default_value is None:
+        collected: List[OrderLineEntry] = []
+        for index, row in enumerate(self._item_rows, start=1):
+            item_combo: QComboBox = row["item_combo"]  # type: ignore[assignment]
+            pallets_edit: QLineEdit = row["pallet_input"]  # type: ignore[assignment]
+            karton_edit: QLineEdit = row["karton_input"]  # type: ignore[assignment]
+            item: Optional[Item] = item_combo.currentData()
+            if item is None:
                 QMessageBox.warning(
                     self,
-                    "Missing value",
-                    f"Item '{item.name}' does not define a default Karton pro Pal. Please enter a value.",
+                    "Missing item",
+                    f"Select a product for line {index}.",
                 )
                 return
-            pallets = float(default_value)
-        else:
-            try:
-                pallets = float(text_value)
-            except ValueError:
-                QMessageBox.warning(self, "Invalid value", "Karton pro Pal must be numeric.")
+            pallets_text = pallets_edit.text().strip()
+            if not pallets_text:
+                QMessageBox.warning(
+                    self,
+                    "Missing pallets",
+                    f"Enter the number of pallets for '{item.name}' (line {index}).",
+                )
                 return
+            try:
+                pallets = float(pallets_text)
+            except ValueError:
+                QMessageBox.warning(
+                    self,
+                    "Invalid value",
+                    f"Pallet count must be numeric for '{item.name}' (line {index}).",
+                )
+                return
+            if pallets <= 0:
+                QMessageBox.warning(
+                    self,
+                    "Invalid value",
+                    f"Pallet count must be greater than zero for '{item.name}' (line {index}).",
+                )
+                return
+            default_ktn = item.ktn_per_pal
+            karton_text = karton_edit.text().strip()
+            if karton_text:
+                try:
+                    ktn_value = float(karton_text)
+                except ValueError:
+                    QMessageBox.warning(
+                        self,
+                        "Invalid value",
+                        f"Karton per pallet must be numeric for '{item.name}' (line {index}).",
+                    )
+                    return
+                if ktn_value <= 0:
+                    QMessageBox.warning(
+                        self,
+                        "Invalid value",
+                        f"Karton per pallet must be greater than zero for '{item.name}' (line {index}).",
+                    )
+                    return
+            else:
+                if default_ktn is None:
+                    QMessageBox.warning(
+                        self,
+                        "Missing value",
+                        f"Item '{item.name}' does not define Karton per pallet. Please enter a value for line {index}.",
+                    )
+                    return
+                ktn_value = float(default_ktn)
+            collected.append(
+                OrderLineEntry(customer=customer, item=item, pallets=pallets, ktn_per_pal=ktn_value)
+            )
 
-        self.selected = OrderLineEntry(customer=customer, item=item, pallets=pallets)
+        self.selected_lines = collected
         self.accept()
 
-    def get_line(self) -> Optional[OrderLineEntry]:
-        """Return the selected line entry or None if the dialog was cancelled."""
+    def get_lines(self) -> List[OrderLineEntry]:
+        """Return the list of collected order line entries."""
         if self.exec() != QDialog.DialogCode.Accepted:
-            return None
-        return self.selected
+            return []
+        return self.selected_lines
 
 
 class OrderDialog(QDialog):
@@ -1051,10 +1175,17 @@ class OrderDialog(QDialog):
         self.warehouse_combo.setMinimumWidth(260)
         form_layout.addRow("Warehouse", self.warehouse_combo)
 
-        self.line_table = QTableWidget(0, 4, self)
-        self.line_table.setHorizontalHeaderLabels(["Customer", "Item", "Pallets", ""])
-        self.line_table.horizontalHeader().setStretchLastSection(True)
+        self.line_table = QTableWidget(0, 5, self)
+        self.line_table.setHorizontalHeaderLabels(["Customer", "Product", "Pallets", "Karton/Pal", ""])
+        self.line_table.horizontalHeader().setStretchLastSection(False)
         self.line_table.setMinimumWidth(600)
+        header = self.line_table.horizontalHeader()
+        header.setMinimumSectionSize(150)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)   # stretch Product column
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.line_table.setColumnWidth(2, 120)
+        self.line_table.setColumnWidth(3, 140)
+        self.line_table.setColumnWidth(4, 110)
         layout.addWidget(QLabel("Order Lines"))
         layout.addWidget(self.line_table)
 
@@ -1091,7 +1222,7 @@ class OrderDialog(QDialog):
         self.remove_line_button.clicked.connect(self.remove_line)
         self.estimate_button.clicked.connect(self.estimate_route)
         self.export_button.clicked.connect(self.export_route)
-        self.add_line_button.setEnabled(bool(self.customers))
+        self.add_line_button.setEnabled(bool(self.customers) and bool(self.items))
 
         self.lines: List[OrderLineEntry] = []
         self.route_order: List[int] = []  # customer IDs in the order list
@@ -1107,6 +1238,20 @@ class OrderDialog(QDialog):
         stripped = text.rstrip("0").rstrip(".")
         return stripped if stripped else "0"
 
+    def _format_optional(self, value: Optional[float]) -> str:
+        """Format optional numeric values, returning '-' when not provided."""
+        if value is None:
+            return "-"
+        return self._format_pallets(float(value))
+
+    def _format_line_summary(self, entry: OrderLineEntry) -> str:
+        """Compose a human-readable summary for exports and previews."""
+        parts = [f"{entry.item.name}: {self._format_pallets(entry.pallets)} Pal"]
+        ktn = entry.ktn_per_pal
+        if ktn is not None:
+            parts.append(f"{self._format_optional(ktn)} Ktn/Pal")
+        return " / ".join(parts)
+
     def add_line(self):
         """Add a new line or overwrite an existing one for the same customer/item pair."""
         if not self.customers:
@@ -1117,34 +1262,35 @@ class OrderDialog(QDialog):
             )
             return
         dialog = OrderLineDialog(self.customers, self.items, self)
-        entry = dialog.get_line()
-        if not entry:
+        entries = dialog.get_lines()
+        if not entries:
             return
-        key = (entry.customer.id, entry.item.id)
-        existing_index: Optional[int] = None
-        for idx, line in enumerate(self.lines):
-            if (line.customer.id, line.item.id) == key:
-                existing_index = idx
-                break
+        for entry in entries:
+            key = (entry.customer.id, entry.item.id)
+            existing_index: Optional[int] = None
+            for idx, line in enumerate(self.lines):
+                if (line.customer.id, line.item.id) == key:
+                    existing_index = idx
+                    break
 
-        if existing_index is not None:
-            self.lines[existing_index] = entry
-            self._update_line_row(existing_index, entry)
-        else:
-            self.lines.append(entry)
-            row = self.line_table.rowCount()
-            self.line_table.insertRow(row)
-            self.line_table.setItem(row, 0, QTableWidgetItem(entry.customer.name))
-            self.line_table.setItem(row, 1, QTableWidgetItem(entry.item.name))
-            self.line_table.setItem(row, 2, QTableWidgetItem(self._format_pallets(entry.pallets)))
-            remove_btn = QPushButton("Remove", self.line_table)
-            remove_btn.clicked.connect(lambda _, r=row: self._remove_line_at(r))
-            self.line_table.setCellWidget(row, 3, remove_btn)
+            if existing_index is not None:
+                self.lines[existing_index] = entry
+                self._update_line_row(existing_index, entry)
+            else:
+                self.lines.append(entry)
+                row = self.line_table.rowCount()
+                self.line_table.insertRow(row)
+                self.line_table.setItem(row, 0, QTableWidgetItem(entry.customer.name))
+                self.line_table.setItem(row, 1, QTableWidgetItem(entry.item.name))
+                self.line_table.setItem(row, 2, QTableWidgetItem(self._format_pallets(entry.pallets)))
+                self.line_table.setItem(row, 3, QTableWidgetItem(self._format_optional(entry.ktn_per_pal)))
+                remove_btn = QPushButton("Remove", self.line_table)
+                remove_btn.clicked.connect(lambda _, btn=remove_btn: self._remove_line_via_button(btn))
+                self.line_table.setCellWidget(row, 4, remove_btn)
 
         self.route_list.clear()
         self.export_button.setEnabled(False)
         self.route_status_label.clear()
-        self.line_table.resizeColumnsToContents()
 
     def _update_line_row(self, row: int, entry: OrderLineEntry) -> None:
         """Refresh the UI table cells to mirror the provided order line entry."""
@@ -1152,6 +1298,7 @@ class OrderDialog(QDialog):
             entry.customer.name,
             entry.item.name,
             self._format_pallets(entry.pallets),
+            self._format_optional(entry.ktn_per_pal),
         ]
         for col, value in enumerate(values):
             item = self.line_table.item(row, col)
@@ -1168,6 +1315,14 @@ class OrderDialog(QDialog):
         self.route_list.clear()
         self.export_button.setEnabled(False)
         self.route_status_label.clear()
+
+    def _remove_line_via_button(self, button: QPushButton) -> None:
+        """Delete the table row associated with a remove button."""
+        for row in range(self.line_table.rowCount()):
+            widget = self.line_table.cellWidget(row, 4)
+            if widget is button:
+                self._remove_line_at(row)
+                break
 
     def remove_line(self):
         """Delete the currently selected order line, if any."""
@@ -1295,7 +1450,7 @@ class OrderDialog(QDialog):
 
         ordered_indices = [0] + ordered_customer_indices
         rows: List[RouteExcelRow] = []
-        lines_by_customer: dict[int, List[OrderLineEntry]] = {}
+        lines_by_customer: dict[str, List[OrderLineEntry]] = {}
         for entry in self.lines:
             id = entry.customer.id
             if id:
@@ -1320,7 +1475,7 @@ class OrderDialog(QDialog):
                     lng=stop.lng,
                     distance_to_next_m=distance,
                     items_summary="; ".join(
-                        f"{line.item.name} x{self._format_pallets(line.pallets)}"
+                        self._format_line_summary(line)
                         for line in lines_by_customer.get(customer.id, [])
                     )
                     if stop_idx != 0 and customer and customer.id is not None
@@ -1375,7 +1530,7 @@ class OrderDialog(QDialog):
             assert entry.item.id is not None
             order_lines.append(
                 OrderLine(
-                    order_id=0,
+                    order_id="",
                     customer_id=entry.customer.id,
                     item_id=entry.item.id,
                     pallets=entry.pallets,

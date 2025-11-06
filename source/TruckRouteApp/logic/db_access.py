@@ -5,6 +5,7 @@ High level CRUD helpers built on top of SQLModel sessions.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import datetime
 from typing import Generator, List, Optional, Sequence
 
 from sqlalchemy import func
@@ -121,7 +122,7 @@ class DatabaseService:
         with self.session() as session:
             return list(session.exec(select(Order).order_by(desc(Order.created_at))).all())
 
-    def get_order(self, order_id: int) -> Optional[Order]:
+    def get_order(self, order_id: str) -> Optional[Order]:
         with self.session() as session:
             return session.get(Order, order_id)
 
@@ -131,10 +132,9 @@ class DatabaseService:
         lines: Sequence[OrderLine],
     ) -> Order:
         with self.session() as session:
-            session.add(order)
-            session.flush()  # ensure order.id is available for lines
             if order.id is None:
-                raise ValueError("Order ID is None after flush")
+                order.id = self._generate_order_id(session, order.created_at)
+            session.add(order)
             for line in lines:
                 line.order_id = order.id
                 session.add(line)
@@ -142,13 +142,13 @@ class DatabaseService:
             session.refresh(order)
             return order
 
-    def list_order_lines(self, order_id: int) -> List[OrderLine]:
+    def list_order_lines(self, order_id: str) -> List[OrderLine]:
         with self.session() as session:
             return list(session.exec(
                 select(OrderLine).where(OrderLine.order_id == order_id)
             ).all())
 
-    def delete_order(self, order_id: int) -> None:
+    def delete_order(self, order_id: str) -> None:
         with self.session() as session:
             order = session.get(Order, order_id)
             if order:
@@ -159,6 +159,17 @@ class DatabaseService:
                     session.delete(line)
                 session.delete(order)
                 session.commit()
+
+    def _generate_order_id(self, session: Session, created_at: datetime) -> str:
+        prefix = created_at.strftime("%d%m%Y")
+        stmt = select(Order.id).where(Order.id.like(f"{prefix}%"))
+        existing_ids = session.exec(stmt).all()
+        max_suffix = 0
+        for value in existing_ids:
+            suffix = value[len(prefix):]
+            if suffix.isdigit():
+                max_suffix = max(max_suffix, int(suffix))
+        return f"{prefix}{max_suffix + 1}"
 
 
 __all__ = ["DatabaseService"]

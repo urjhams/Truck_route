@@ -50,7 +50,7 @@ CUSTOMERS(
 )
 
 ITEMS(
-    id INTEGER PRIMARY KEY,
+    id TEXT PRIMARY KEY,
     name TEXT,
     ktn_per_pal INTEGER,
     items_per_ktn TEXT,
@@ -60,16 +60,17 @@ ITEMS(
 )
 
 Note: Customer and Item `id` values are user-managed strings. New records must be created with explicit unique IDs (e.g., customer codes, SKU) in both the UI dialogs and CSV importers.
+Order IDs are auto-generated strings using the pattern `DDMMYYYY#`, where `#` increments per day (e.g., `061120251` for the first order on 6 Nov 2025).
 
 ORDERS(
-    id INTEGER PRIMARY KEY,
+    id TEXT PRIMARY KEY,
     warehouse_id INTEGER REFERENCES WAREHOUSES(id),
     created_at TEXT
 )
 
 ORDER_LINES(
     id INTEGER PRIMARY KEY,
-    order_id INTEGER REFERENCES ORDERS(id),
+    order_id TEXT REFERENCES ORDERS(id),
     customer_id TEXT REFERENCES CUSTOMERS(id),
     item_id TEXT REFERENCES ITEMS(id),
     qty INTEGER
