@@ -45,18 +45,26 @@ from TruckRouteApp.models.schema import Customer, Item, Order, OrderLine, Wareho
 
 
 class ColumnConfig:
+    """Model column definition coupling header text with a value extractor."""
+
     def __init__(self, header: str, extractor: Callable):
         self.header = header
         self.extractor = extractor
 
 
 class SQLModelTableModel(QAbstractTableModel):
+    """
+    Generic Qt table model that adapts SQLModel rows for presentation.
+    Column descriptors supply both header labels and value extraction logic.
+    """
+
     def __init__(self, columns: Sequence[ColumnConfig], parent=None):
         super().__init__(parent)
         self._columns = list(columns)
         self._rows: List = []
 
     def set_rows(self, rows: Sequence) -> None:
+        """Replace the backing data set with the provided rows."""
         self.beginResetModel()
         self._rows = list(rows)
         self.endResetModel()
@@ -97,6 +105,11 @@ class SQLModelTableModel(QAbstractTableModel):
 
 
 class BaseCrudView(QWidget):
+    """
+    Shared UI scaffolding for CRUD list views with a table and common actions.
+    Subclasses supply their own data model and handlers for the toolbar buttons.
+    """
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.main_layout = QVBoxLayout(self)
@@ -119,6 +132,7 @@ class BaseCrudView(QWidget):
             self.button_bar.addWidget(widget)
 
     def selected_index(self) -> Optional[QModelIndex]:
+        """Return the currently selected row index or None when nothing is selected."""
         selection = self.table.selectionModel()
         if not selection:
             return None
@@ -133,6 +147,7 @@ class BaseCrudView(QWidget):
         self.table.resizeColumnsToContents()
 
     def _on_double_clicked(self, index: QModelIndex) -> None:
+        """Invoke the subclass `edit` handler when the user double-clicks a row."""
         if not index.isValid():
             return
         if hasattr(self, "edit"):
@@ -143,6 +158,11 @@ class BaseCrudView(QWidget):
 
 
 class CSVMappingDialog(QDialog):
+    """
+    Lets the user map CSV headers to application fields, enforcing uniqueness and
+    allowing optional fields to be skipped.
+    """
+
     def __init__(
         self,
         headers: Sequence[str],
@@ -180,6 +200,7 @@ class CSVMappingDialog(QDialog):
         layout.addWidget(buttons)
 
     def _auto_select_default(self, combo: QComboBox, field: str, label: str, headers: Sequence[str]) -> None:
+        """Pre-select a column whose name best matches the target field label."""
         candidates = {
             field.lower(),
             label.lower(),
@@ -192,6 +213,7 @@ class CSVMappingDialog(QDialog):
                 return
 
     def _handle_accept(self) -> None:
+        """Validate selections and persist them before closing the dialog."""
         mapping: Dict[str, Optional[str]] = {}
         used_columns: set[str] = set()
         for field, combo in self._combos.items():
@@ -210,12 +232,15 @@ class CSVMappingDialog(QDialog):
         self.accept()
 
     def get_mapping(self) -> Optional[Dict[str, Optional[str]]]:
+        """Return the validated mapping once the dialog has been accepted."""
         if self.exec() != QDialog.DialogCode.Accepted:
             return None
         return self._mapping
 
 
 class WarehouseDialog(QDialog):
+    """Modal editor for creating or updating a single warehouse record."""
+
     def __init__(self, warehouse: Optional[Warehouse] = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Warehouse")
@@ -243,6 +268,10 @@ class WarehouseDialog(QDialog):
         form.addRow(buttons)
 
     def get_data(self) -> Optional[Warehouse]:
+        """
+        Present the dialog until valid numeric coordinates are entered.
+        Returns the updated warehouse or None if the dialog was cancelled.
+        """
         while True:
             if self.exec() != QDialog.DialogCode.Accepted:
                 return None
@@ -261,6 +290,8 @@ class WarehouseDialog(QDialog):
 
 
 class CustomerDialog(QDialog):
+    """Modal editor for customer records with optional coordinates."""
+
     def __init__(self, customer: Optional[Customer] = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Customer")
@@ -288,6 +319,10 @@ class CustomerDialog(QDialog):
         form.addRow(buttons)
 
     def get_data(self) -> Optional[Customer]:
+        """
+        Display the dialog until the submitted latitude/longitude values are valid.
+        Returns the updated customer or None when cancelled.
+        """
         while True:
             if self.exec() != QDialog.DialogCode.Accepted:
                 return None
@@ -311,6 +346,8 @@ class CustomerDialog(QDialog):
 
 
 class ItemDialog(QDialog):
+    """Modal editor for product items with optional weight and carton metadata."""
+
     def __init__(self, item: Optional[Item] = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Item")
@@ -336,6 +373,10 @@ class ItemDialog(QDialog):
         form.addRow(buttons)
 
     def get_data(self) -> Optional[Item]:
+        """
+        Persist user edits after validating numeric fields.
+        Returns the updated item or None if the dialog was cancelled.
+        """
         while True:
             if self.exec() != QDialog.DialogCode.Accepted:
                 return None
@@ -359,6 +400,8 @@ class ItemDialog(QDialog):
 
 
 class WarehouseView(BaseCrudView):
+    """CRUD view presenting warehouses and handling create/edit/delete actions."""
+
     def __init__(self, db: DatabaseService, parent=None):
         super().__init__(parent)
         self.db = db
@@ -379,6 +422,7 @@ class WarehouseView(BaseCrudView):
         self.refresh()
 
     def refresh(self):
+        """Reload the warehouse table from the database."""
         self.model.set_rows(self.db.list_warehouses())
         self.table.resizeColumnsToContents()
 
@@ -420,6 +464,8 @@ class WarehouseView(BaseCrudView):
 
 
 class CustomerView(BaseCrudView):
+    """CRUD view for customer records, including CSV import support."""
+
     def __init__(self, db: DatabaseService, parent=None):
         super().__init__(parent)
         self.db = db
@@ -442,6 +488,7 @@ class CustomerView(BaseCrudView):
         self.import_button.clicked.connect(self.import_csv)
 
     def refresh(self):
+        """Refresh the customer list from persistent storage."""
         self.model.set_rows(self.db.list_customers())
         self.table.resizeColumnsToContents()
 
@@ -482,6 +529,7 @@ class CustomerView(BaseCrudView):
             self.refresh()
 
     def import_csv(self):
+        """Import customers from a CSV file, skipping duplicates and quiet errors."""
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Import customers from CSV",
@@ -545,6 +593,8 @@ class CustomerView(BaseCrudView):
 
 
 class ItemView(BaseCrudView):
+    """CRUD view for items with optional CSV import into the catalog."""
+
     def __init__(self, db: DatabaseService, parent=None):
         super().__init__(parent)
         self.db = db
@@ -566,6 +616,7 @@ class ItemView(BaseCrudView):
         self.import_button.clicked.connect(self.import_csv)
 
     def refresh(self):
+        """Refresh the items table with the latest records."""
         self.model.set_rows(self.db.list_items())
         self.table.resizeColumnsToContents()
 
@@ -606,6 +657,7 @@ class ItemView(BaseCrudView):
             self.refresh()
 
     def import_csv(self):
+        """Import item records from CSV, capturing row-level issues for the user."""
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Import items from CSV",
@@ -678,12 +730,18 @@ class ItemView(BaseCrudView):
 
 @dataclass
 class OrderLineEntry:
+    """In-memory representation of a line awaiting persistence on the order."""
     customer: Customer
     item: Item
     pallets: float
 
 
 class RouteCalculationWorker(QObject):
+    """
+    Worker object that performs route optimisation on a background thread.
+    Emits a `(result, error)` tuple when finished so the UI can react safely.
+    """
+
     finished = Signal(object, object)  # Tuple[Optional[RouteResult], Optional[BaseException]]
 
     def __init__(self, stops: Sequence[Stop], return_to_depot: bool = True, parent=None):
@@ -692,6 +750,7 @@ class RouteCalculationWorker(QObject):
         self._return_to_depot = return_to_depot
 
     def run(self) -> None:
+        """Compute the optimal route and emit the outcome back to the main thread."""
         try:
             result = optimise_route(self._stops, return_to_depot=self._return_to_depot)
         except Exception as exc:  # propagate error to GUI thread
@@ -701,6 +760,8 @@ class RouteCalculationWorker(QObject):
 
 
 class OrderLineDialog(QDialog):
+    """Collects a single order line, allowing user to pick customer/item/pallets."""
+
     def __init__(self, customers: Sequence[Customer], items: Sequence[Item], parent=None):
         super().__init__(parent)
         self.setWindowTitle("Add Line")
@@ -733,6 +794,7 @@ class OrderLineDialog(QDialog):
         form.addRow(buttons)
 
     def get_line(self) -> Optional[OrderLineEntry]:
+        """Return the selected line entry or None if the dialog was cancelled."""
         if self.exec() != QDialog.DialogCode.Accepted:
             return None
         customer = self.customer_combo.currentData()
@@ -742,6 +804,11 @@ class OrderLineDialog(QDialog):
 
 
 class OrderDialog(QDialog):
+    """
+    Multi-step wizard for building an order: choose warehouse, add lines, preview
+    the route, and optionally export to Excel before confirming.
+    """
+
     def __init__(self, db: DatabaseService, parent=None):
         super().__init__(parent)
         self.db = db
@@ -834,11 +901,13 @@ class OrderDialog(QDialog):
 
     @staticmethod
     def _format_pallets(value: float) -> str:
+        """Format pallet counts for display, trimming superfluous zeros and dots."""
         text = f"{value:.2f}"
         stripped = text.rstrip("0").rstrip(".")
         return stripped if stripped else "0"
 
     def add_line(self):
+        """Add a new line or overwrite an existing one for the same customer/item pair."""
         if not self.customers:
             QMessageBox.warning(
                 self,
@@ -877,6 +946,7 @@ class OrderDialog(QDialog):
         self.line_table.resizeColumnsToContents()
 
     def _update_line_row(self, row: int, entry: OrderLineEntry) -> None:
+        """Refresh the UI table cells to mirror the provided order line entry."""
         values = [
             entry.customer.name,
             entry.item.name,
@@ -890,6 +960,7 @@ class OrderDialog(QDialog):
                 item.setText(value)
 
     def _remove_line_at(self, row: int):
+        """Remove a row from both state and table, clearing stale route previews."""
         if 0 <= row < len(self.lines):
             self.lines.pop(row)
             self.line_table.removeRow(row)
@@ -898,11 +969,13 @@ class OrderDialog(QDialog):
         self.route_status_label.clear()
 
     def remove_line(self):
+        """Delete the currently selected order line, if any."""
         row = self.line_table.currentRow()
         if row >= 0:
             self._remove_line_at(row)
 
     def _build_stops(self) -> Optional[List[Stop]]:
+        """Translate order lines into a stop list suitable for the routing engine."""
         if not self.lines:
             QMessageBox.warning(self, "Missing lines", "Please add at least one order line.")
             return None
@@ -922,6 +995,7 @@ class OrderDialog(QDialog):
         return stops
 
     def estimate_route(self):
+        """Kick off background route optimisation and update the UI state."""
         if self.route_thread and self.route_thread.isRunning():
             QMessageBox.information(self, "Route calculation", "A route calculation is already in progress.")
             return
@@ -954,6 +1028,7 @@ class OrderDialog(QDialog):
         thread.start()
 
     def _on_route_finished(self, result: Optional[RouteResult], error: Optional[BaseException]) -> None:
+        """Handle background routing completion, updating the list or surfacing errors."""
         self.route_worker = None
         self.estimate_button.setEnabled(True)
         if error or result is None:
@@ -968,6 +1043,7 @@ class OrderDialog(QDialog):
         self.export_button.setEnabled(True)
 
     def _populate_route_list(self, result: RouteResult) -> None:
+        """Render the computed route into the preview widget and store ordering."""
         stops = self.current_stops
         if not stops:
             return
@@ -994,11 +1070,13 @@ class OrderDialog(QDialog):
             self.route_list.addItem(item)
 
     def _on_route_thread_finished(self) -> None:
+        """Reset thread references once the worker completes or aborts."""
         self.route_thread = None
         if self.route_status_label.text() == "Calculating route...":
             self.route_status_label.clear()
 
     def export_route(self):
+        """Convert the current previewed route into an Excel workbook."""
         if self.route_list.count() <= 1:
             QMessageBox.warning(self, "Route missing", "Please estimate the route first.")
             return
@@ -1072,6 +1150,7 @@ class OrderDialog(QDialog):
         QMessageBox.information(self, "Export complete", f"Excel file saved to {path}")
 
     def accept(self):
+        """Validate order prerequisites before letting the dialog close successfully."""
         if not self.lines:
             QMessageBox.warning(self, "Missing lines", "Add at least one order line.")
             return
@@ -1082,6 +1161,7 @@ class OrderDialog(QDialog):
         super().accept()
 
     def get_payload(self) -> Optional[tuple[Order, List[OrderLine]]]:
+        """Execute the dialog and, on success, return order and line models ready for saving."""
         if self.exec() != QDialog.DialogCode.Accepted:
             return None
 
@@ -1104,6 +1184,8 @@ class OrderDialog(QDialog):
 
 
 class OrderView(BaseCrudView):
+    """Read-only order list with actions to create and delete orders."""
+
     def __init__(self, db: DatabaseService, parent=None):
         super().__init__(parent)
         self.db = db
@@ -1124,14 +1206,17 @@ class OrderView(BaseCrudView):
         self.refresh_button.clicked.connect(self.refresh)
 
     def _warehouse_name(self, order: Order):
+        """Resolve the warehouse name lazily so we can display it in the table."""
         warehouse = self.db.get_warehouse(order.warehouse_id)
         return warehouse.name if warehouse else "Unknown"
 
     def refresh(self):
+        """Reload the order listing, sorted by creation timestamp."""
         self.model.set_rows(self.db.list_orders())
         self.table.resizeColumnsToContents()
 
     def create_order(self):
+        """Open the order dialog and persist the resulting order if confirmed."""
         dialog = OrderDialog(self.db, self)
         payload = dialog.get_payload()
         if not payload:
@@ -1141,6 +1226,7 @@ class OrderView(BaseCrudView):
         self.refresh()
 
     def delete_order(self):
+        """Prompt for confirmation before deleting the selected order."""
         index = self.selected_index()
         if not index:
             return
@@ -1158,6 +1244,8 @@ class OrderView(BaseCrudView):
 
 
 class MainWindow(QMainWindow):
+    """Top-level window containing navigation and the individual CRUD views."""
+
     def __init__(self, db_service: DatabaseService):
         super().__init__()
         self.db_service = db_service
@@ -1196,6 +1284,7 @@ class MainWindow(QMainWindow):
         self.nav_list.setCurrentRow(0)
 
     def on_nav_changed(self, row: int):
+        """Swap the visible view when the user selects a different navigation item."""
         item = self.nav_list.item(row)
         if not item:
             return
@@ -1205,6 +1294,7 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    """Initialise the database, spin up the Qt application, and start the event loop."""
     init_db()
     db_service = DatabaseService()
     app = QApplication(sys.argv)
