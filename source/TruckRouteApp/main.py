@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
+    QHeaderView
 )
 
 from TruckRouteApp.db import init_db
@@ -171,6 +172,7 @@ class CSVMappingDialog(QDialog):
     ):
         super().__init__(parent)
         self.setWindowTitle("Map CSV Columns")
+        self.setMinimumWidth(480)
         self._combos: Dict[str, QComboBox] = {}
         self._required: Dict[str, bool] = {}
         self._mapping: Dict[str, Optional[str]] = {}
@@ -182,6 +184,7 @@ class CSVMappingDialog(QDialog):
             combo.addItem("<Skip>", "")
             for header in headers:
                 combo.addItem(header, header)
+            combo.setMinimumWidth(260)
             self._combos[field] = combo
             self._required[field] = required
             display_label = f"{label}{' *' if required else ''}"
@@ -244,19 +247,24 @@ class WarehouseDialog(QDialog):
     def __init__(self, warehouse: Optional[Warehouse] = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Warehouse")
+        self.setMinimumWidth(420)
         self.warehouse = warehouse or Warehouse(name="", lat=0.0, lng=0.0)
 
         form = QFormLayout(self)
         self.name_edit = QLineEdit(self.warehouse.name, self)
+        self.name_edit.setMinimumWidth(300)
         self.address_edit = QLineEdit(self.warehouse.address or "", self)
+        self.address_edit.setMinimumWidth(300)
         self.lat_edit = QLineEdit(
             "" if self.warehouse.lat is None else str(self.warehouse.lat),
             self,
         )
+        self.lat_edit.setMinimumWidth(140)
         self.lng_edit = QLineEdit(
             "" if self.warehouse.lng is None else str(self.warehouse.lng),
             self,
         )
+        self.lng_edit.setMinimumWidth(140)
         form.addRow("Name", self.name_edit)
         form.addRow("Address", self.address_edit)
         form.addRow("Latitude", self.lat_edit)
@@ -295,19 +303,24 @@ class CustomerDialog(QDialog):
     def __init__(self, customer: Optional[Customer] = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Customer")
+        self.setMinimumWidth(420)  # widen the dialog for better readability
         self.customer = customer or Customer(name="", lat=0.0, lng=0.0)
 
         form = QFormLayout(self)
         self.name_edit = QLineEdit(self.customer.name, self)
+        self.name_edit.setMinimumWidth(300)
         self.address_edit = QLineEdit(self.customer.address or "", self)
+        self.address_edit.setMinimumWidth(300)
         self.lat_edit = QLineEdit(
             "" if self.customer.lat is None else str(self.customer.lat),
             self,
         )
+        self.lat_edit.setMinimumWidth(300)
         self.lng_edit = QLineEdit(
             "" if self.customer.lng is None else str(self.customer.lng),
             self,
         )
+        self.lng_edit.setMinimumWidth(300)
         form.addRow("Name", self.name_edit)
         form.addRow("Address", self.address_edit)
         form.addRow("Latitude", self.lat_edit)
@@ -351,18 +364,22 @@ class ItemDialog(QDialog):
     def __init__(self, item: Optional[Item] = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Item")
+        self.setMinimumWidth(420)
         self.item = item or Item(name="")
 
         form = QFormLayout(self)
         self.name_edit = QLineEdit(self.item.name, self)
+        self.name_edit.setMinimumWidth(300)
         self.weight_edit = QLineEdit(
             "" if self.item.weight_per_ctn is None else str(self.item.weight_per_ctn),
             self,
         )
+        self.weight_edit.setMinimumWidth(140)
         self.ctn_edit = QLineEdit(
             "" if self.item.ctn_per_pallet is None else str(self.item.ctn_per_pallet),
             self,
         )
+        self.ctn_edit.setMinimumWidth(140)
         form.addRow("Name", self.name_edit)
         form.addRow("Weight per ctn", self.weight_edit)
         form.addRow("Ctn per pallet", self.ctn_edit)
@@ -413,6 +430,9 @@ class WarehouseView(BaseCrudView):
         ]
         model = SQLModelTableModel(columns, self)
         self.set_model(model)
+        
+        self.table.horizontalHeader().setMinimumSectionSize(100)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)   # strech address column
 
         self.add_button.clicked.connect(self.add)
         self.edit_button.clicked.connect(self.edit)
@@ -478,6 +498,9 @@ class CustomerView(BaseCrudView):
         self.model = SQLModelTableModel(columns, self)
         self.set_model(self.model)
         self.refresh()
+        
+        self.table.horizontalHeader().setMinimumSectionSize(100)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)   # strech address column
 
         self.add_button.clicked.connect(self.add)
         self.edit_button.clicked.connect(self.edit)
@@ -606,6 +629,9 @@ class ItemView(BaseCrudView):
         self.model = SQLModelTableModel(columns, self)
         self.set_model(self.model)
         self.refresh()
+                
+        self.table.horizontalHeader().setMinimumSectionSize(100)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)   # strech Name column
 
         self.add_button.clicked.connect(self.add)
         self.edit_button.clicked.connect(self.edit)
@@ -765,6 +791,7 @@ class OrderLineDialog(QDialog):
     def __init__(self, customers: Sequence[Customer], items: Sequence[Item], parent=None):
         super().__init__(parent)
         self.setWindowTitle("Add Line")
+        self.setMinimumWidth(420)
         self.customers = list(customers)
         self.items = list(items)
         self.selected: Optional[OrderLineEntry] = None
@@ -773,16 +800,19 @@ class OrderLineDialog(QDialog):
         self.customer_combo = QComboBox(self)
         for customer in self.customers:
             self.customer_combo.addItem(customer.name, customer)
+        self.customer_combo.setMinimumWidth(260)
 
         self.item_combo = QComboBox(self)
         for item in self.items:
             self.item_combo.addItem(item.name, item)
+        self.item_combo.setMinimumWidth(260)
 
         self.pallet_spin = QDoubleSpinBox(self)
         self.pallet_spin.setDecimals(2)
         self.pallet_spin.setSingleStep(0.25)
         self.pallet_spin.setRange(0.1, 100000.0)
         self.pallet_spin.setValue(1.0)
+        self.pallet_spin.setMinimumWidth(140)
 
         form.addRow("Customer", self.customer_combo)
         form.addRow("Item", self.item_combo)
@@ -814,6 +844,7 @@ class OrderDialog(QDialog):
         self.db = db
         self.setWindowTitle("Create Order")
         self.resize(720, 500)
+        self.setMinimumWidth(900)
 
         self.warehouses = self.db.list_warehouses()
         self.customers_all = self.db.list_customers()
@@ -850,11 +881,13 @@ class OrderDialog(QDialog):
         self.warehouse_combo = QComboBox(self)
         for warehouse in self.warehouses:
             self.warehouse_combo.addItem(warehouse.name, warehouse)
+        self.warehouse_combo.setMinimumWidth(260)
         form_layout.addRow("Warehouse", self.warehouse_combo)
 
         self.line_table = QTableWidget(0, 4, self)
         self.line_table.setHorizontalHeaderLabels(["Customer", "Item", "Pallets", ""])
         self.line_table.horizontalHeader().setStretchLastSection(True)
+        self.line_table.setMinimumWidth(600)
         layout.addWidget(QLabel("Order Lines"))
         layout.addWidget(self.line_table)
 
@@ -868,6 +901,7 @@ class OrderDialog(QDialog):
         layout.addWidget(QLabel("Route preview (drag to reorder)"))
         self.route_list = QListWidget(self)
         self.route_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.route_list.setMinimumWidth(300)
         layout.addWidget(self.route_list)
 
         self.route_status_label = QLabel("", self)
@@ -1204,6 +1238,9 @@ class OrderView(BaseCrudView):
         self.add_button.clicked.connect(self.create_order)
         self.delete_button.clicked.connect(self.delete_order)
         self.refresh_button.clicked.connect(self.refresh)
+                
+        self.table.horizontalHeader().setMinimumSectionSize(100)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
 
     def _warehouse_name(self, order: Order):
         """Resolve the warehouse name lazily so we can display it in the table."""
