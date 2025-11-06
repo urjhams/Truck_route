@@ -92,14 +92,17 @@ def _ensure_customers_lat_lng_nullable(conn) -> None:
             needs_migration = True
             break
 
-    if not needs_migration:
+    id_meta = col_meta.get("id")
+    id_needs_text = id_meta and (id_meta[2] or "").upper() != "TEXT"
+
+    if not needs_migration and not id_needs_text:
         return
 
     conn.exec_driver_sql("PRAGMA foreign_keys=off;")
     conn.exec_driver_sql(
         """
         CREATE TABLE IF NOT EXISTS __CUSTOMERS_NEW (
-            id INTEGER PRIMARY KEY,
+            id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             address TEXT,
             lat REAL,
@@ -202,10 +205,11 @@ def _ensure_order_lines_item_id_text(conn) -> None:
 
     columns = conn.exec_driver_sql('PRAGMA table_info("ORDER_LINES");').fetchall()
     col_meta = {row[1].lower(): row for row in columns}
+    customer_meta = col_meta.get("customer_id")
     item_meta = col_meta.get("item_id")
-    if not item_meta:
-        return
-    if (item_meta[2] or "").upper() == "TEXT":
+    needs_customer_text = customer_meta and (customer_meta[2] or "").upper() != "TEXT"
+    needs_item_text = item_meta and (item_meta[2] or "").upper() != "TEXT"
+    if not needs_customer_text and not needs_item_text:
         return
 
     conn.exec_driver_sql("PRAGMA foreign_keys=off;")
@@ -214,7 +218,7 @@ def _ensure_order_lines_item_id_text(conn) -> None:
         CREATE TABLE IF NOT EXISTS __ORDER_LINES_NEW (
             id INTEGER PRIMARY KEY,
             order_id INTEGER REFERENCES ORDERS(id),
-            customer_id INTEGER REFERENCES CUSTOMERS(id),
+            customer_id TEXT REFERENCES CUSTOMERS(id),
             item_id TEXT REFERENCES ITEMS(id),
             pallets REAL NOT NULL DEFAULT 0.0
         );
@@ -223,7 +227,7 @@ def _ensure_order_lines_item_id_text(conn) -> None:
     conn.exec_driver_sql(
         """
         INSERT INTO __ORDER_LINES_NEW (id, order_id, customer_id, item_id, pallets)
-        SELECT id, order_id, customer_id, CAST(item_id AS TEXT), pallets
+        SELECT id, order_id, CAST(customer_id AS TEXT), CAST(item_id AS TEXT), pallets
         FROM ORDER_LINES;
         """
     )

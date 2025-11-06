@@ -78,7 +78,7 @@ class DatabaseService:
             )
             return session.exec(stmt).first() is not None
 
-    def delete_customer(self, customer_id: int) -> None:
+    def delete_customer(self, customer_id: str) -> None:
         with self.session() as session:
             customer = session.get(Customer, customer_id)
             if customer:

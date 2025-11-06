@@ -28,7 +28,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QDoubleSpinBox,
     QSplitter,
     QTableView,
     QTableWidget,
@@ -307,6 +306,14 @@ class CustomerDialog(QDialog):
         self.customer = customer or Customer(name="", lat=0.0, lng=0.0)
 
         form = QFormLayout(self)
+        self.id_edit = QLineEdit("" if self.customer.id is None else str(self.customer.id), self)
+        self.id_edit.setMinimumWidth(200)
+        if self.customer.id is not None:
+            self.id_edit.setReadOnly(True)
+        else:
+            self.id_edit.setPlaceholderText("Required")
+        form.addRow("ID", self.id_edit)
+
         self.name_edit = QLineEdit(self.customer.name, self)
         self.name_edit.setMinimumWidth(300)
         self.address_edit = QLineEdit(self.customer.address or "", self)
@@ -351,6 +358,12 @@ class CustomerDialog(QDialog):
             except ValueError:
                 QMessageBox.warning(self, "Validation error", "Longitude must be a numeric value.")
                 continue
+            id_text = self.id_edit.text().strip()
+            if not id_text and self.customer.id is None:
+                QMessageBox.warning(self, "Validation error", "ID is required.")
+                continue
+            if id_text:
+                self.customer.id = id_text
             self.customer.name = self.name_edit.text()
             self.customer.address = self.address_edit.text()
             self.customer.lat = lat
@@ -537,6 +550,7 @@ class CustomerView(BaseCrudView):
         super().__init__(parent)
         self.db = db
         columns = [
+            ColumnConfig("ID", lambda c: c.id),
             ColumnConfig("Name", lambda c: c.name),
             ColumnConfig("Address", lambda c: c.address or ""),
             ColumnConfig("Latitude", lambda c: c.lat if c.lat is not None else ""),
@@ -546,8 +560,10 @@ class CustomerView(BaseCrudView):
         self.set_model(self.model)
         self.refresh()
         
-        self.table.horizontalHeader().setMinimumSectionSize(100)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)   # strech address column
+        header = self.table.horizontalHeader()
+        header.setMinimumSectionSize(100)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)   # stretch Name column
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)   # stretch Address column
 
         self.add_button.clicked.connect(self.add)
         self.edit_button.clicked.connect(self.edit)
@@ -556,6 +572,17 @@ class CustomerView(BaseCrudView):
         self.import_button = QPushButton("Import CSV", self)
         self.button_bar.insertWidget(3, self.import_button)
         self.import_button.clicked.connect(self.import_csv)
+
+    @staticmethod
+    def _open_sniffed_reader(fh) -> csv.DictReader:
+        sample = fh.read(2048)
+        fh.seek(0)
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=";,")
+            delimiter = dialect.delimiter
+        except Exception:
+            delimiter = ";"
+        return csv.DictReader(fh, delimiter=delimiter)
 
     def refresh(self):
         """Refresh the customer list from persistent storage."""
@@ -610,13 +637,14 @@ class CustomerView(BaseCrudView):
             return
         try:
             with open(path, newline="", encoding="utf-8-sig") as fh:
-                reader = csv.DictReader(fh, delimiter=";")
+                reader = self._open_sniffed_reader(fh)
                 headers = reader.fieldnames
                 if not headers:
                     raise ValueError("CSV file must include a header row.")
                 mapping_dialog = CSVMappingDialog(
                     headers,
                     [
+                        ("id", "ID", True),
                         ("name", "Name", True),
                         ("address", "Address", False),
                         ("lat", "Latitude", True),
@@ -627,6 +655,7 @@ class CustomerView(BaseCrudView):
                 mapping = mapping_dialog.get_mapping()
                 if not mapping:
                     return
+                id_col = mapping["id"]
                 name_col = mapping["name"]
                 address_col = mapping.get("address")
                 lat_col = mapping["lat"]
@@ -635,6 +664,9 @@ class CustomerView(BaseCrudView):
                     if not any(row.values()):
                         continue
                     try:
+                        id_value = (row.get(id_col) or "").strip()
+                        if not id_value:
+                            raise ValueError("missing id")
                         name = (row.get(name_col) or "").strip()
                         if not name:
                             raise ValueError("missing name")
@@ -652,7 +684,7 @@ class CustomerView(BaseCrudView):
                         address = address_value or None
                         if self.db.customer_exists(name, address):
                             continue
-                        customer = Customer(name=name, address=address, lat=lat, lng=lng)
+                        customer = Customer(id=id_value, name=name, address=address, lat=lat, lng=lng)
                         self.db.save_customer(customer)
                     except Exception:  # noqa: BLE001
                         # Rows with format issues are ignored silently; only critical errors are shown.
@@ -696,6 +728,17 @@ class ItemView(BaseCrudView):
         """Refresh the items table with the latest records."""
         self.model.set_rows(self.db.list_items())
         self.table.resizeColumnsToContents()
+
+    @staticmethod
+    def _open_sniffed_reader(fh) -> csv.DictReader:
+        sample = fh.read(2048)
+        fh.seek(0)
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=";,")
+            delimiter = dialect.delimiter
+        except Exception:
+            delimiter = ";"
+        return csv.DictReader(fh, delimiter=delimiter)
 
     def add(self):
         dialog = ItemDialog(parent=self)
@@ -745,7 +788,7 @@ class ItemView(BaseCrudView):
             return
         try:
             with open(path, newline="", encoding="utf-8-sig") as fh:
-                reader = csv.DictReader(fh, delimiter=";")
+                reader = self._open_sniffed_reader(fh)
                 headers = reader.fieldnames
                 if not headers:
                     raise ValueError("CSV file must include a header row.")
@@ -892,31 +935,69 @@ class OrderLineDialog(QDialog):
         for item in self.items:
             self.item_combo.addItem(item.name, item)
         self.item_combo.setMinimumWidth(260)
+        self.item_combo.currentIndexChanged.connect(self._apply_placeholder)
 
-        self.pallet_spin = QDoubleSpinBox(self)
-        self.pallet_spin.setDecimals(2)
-        self.pallet_spin.setSingleStep(0.25)
-        self.pallet_spin.setRange(0.1, 100000.0)
-        self.pallet_spin.setValue(1.0)
-        self.pallet_spin.setMinimumWidth(140)
+        self.pallet_input = QLineEdit(self)
+        self.pallet_input.setMinimumWidth(160)
 
         form.addRow("Customer", self.customer_combo)
         form.addRow("Item", self.item_combo)
-        form.addRow("Pallets", self.pallet_spin)
+        form.addRow("Karton pro Pal", self.pallet_input)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, parent=self)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        form.addRow(buttons)
+        self.button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        self.button_box.accepted.connect(self._handle_accept)
+        self.button_box.rejected.connect(self.reject)
+        form.addRow(self.button_box)
+
+        self._apply_placeholder()
+
+    def _current_item(self) -> Optional[Item]:
+        return self.item_combo.currentData()
+
+    def _apply_placeholder(self) -> None:
+        item = self._current_item()
+        if item and item.ktn_per_pal is not None:
+            self.pallet_input.setPlaceholderText(str(item.ktn_per_pal))
+        else:
+            self.pallet_input.setPlaceholderText("")
+        self.pallet_input.clear()
+
+    def _handle_accept(self) -> None:
+        customer = self.customer_combo.currentData()
+        item = self._current_item()
+        if customer is None or item is None:
+            QMessageBox.warning(self, "Missing selection", "Please choose both a customer and an item.")
+            return
+
+        text_value = self.pallet_input.text().strip()
+        if not text_value:
+            default_value = item.ktn_per_pal
+            if default_value is None:
+                QMessageBox.warning(
+                    self,
+                    "Missing value",
+                    f"Item '{item.name}' does not define a default Karton pro Pal. Please enter a value.",
+                )
+                return
+            pallets = float(default_value)
+        else:
+            try:
+                pallets = float(text_value)
+            except ValueError:
+                QMessageBox.warning(self, "Invalid value", "Karton pro Pal must be numeric.")
+                return
+
+        self.selected = OrderLineEntry(customer=customer, item=item, pallets=pallets)
+        self.accept()
 
     def get_line(self) -> Optional[OrderLineEntry]:
         """Return the selected line entry or None if the dialog was cancelled."""
         if self.exec() != QDialog.DialogCode.Accepted:
             return None
-        customer = self.customer_combo.currentData()
-        item = self.item_combo.currentData()
-        pallets = float(self.pallet_spin.value())
-        return OrderLineEntry(customer=customer, item=item, pallets=pallets)
+        return self.selected
 
 
 class OrderDialog(QDialog):

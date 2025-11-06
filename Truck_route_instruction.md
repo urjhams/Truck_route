@@ -42,7 +42,7 @@ WAREHOUSES(
 )
 
 CUSTOMERS(
-    id INTEGER PRIMARY KEY,
+    id TEXT PRIMARY KEY,
     name TEXT,
     address TEXT,
     lat REAL,
@@ -59,7 +59,7 @@ ITEMS(
     tax TEXT
 )
 
-Note: Item `id` values are user-managed strings. New items must be created with an explicit unique ID (e.g., SKU) both in the UI dialog and the CSV importer.
+Note: Customer and Item `id` values are user-managed strings. New records must be created with explicit unique IDs (e.g., customer codes, SKU) in both the UI dialogs and CSV importers.
 
 ORDERS(
     id INTEGER PRIMARY KEY,
@@ -70,7 +70,7 @@ ORDERS(
 ORDER_LINES(
     id INTEGER PRIMARY KEY,
     order_id INTEGER REFERENCES ORDERS(id),
-    customer_id INTEGER REFERENCES CUSTOMERS(id),
+    customer_id TEXT REFERENCES CUSTOMERS(id),
     item_id TEXT REFERENCES ITEMS(id),
     qty INTEGER
 )

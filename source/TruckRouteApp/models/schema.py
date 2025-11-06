@@ -23,7 +23,7 @@ class Customer(SQLModel, table=True):
     __tablename__: str = "CUSTOMERS"
     __tablename__ = "CUSTOMERS"
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: Optional[str] = Field(default=None, primary_key=True)
     name: str = Field(index=True, nullable=False)
     address: Optional[str] = Field(default=None)
     lat: Optional[float] = Field(default=None, nullable=True)
@@ -55,7 +55,7 @@ class OrderLine(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     order_id: int = Field(foreign_key="ORDERS.id", nullable=False)
-    customer_id: int = Field(foreign_key="CUSTOMERS.id", nullable=False)
+    customer_id: str = Field(foreign_key="CUSTOMERS.id", nullable=False)
     item_id: str = Field(foreign_key="ITEMS.id", nullable=False)
     pallets: float = Field(default=0.0, nullable=False)
 
