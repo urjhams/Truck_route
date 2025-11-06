@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Generator, List, Optional, Sequence
 
-from sqlalchemy import func
+from sqlalchemy import func, cast, String
 from sqlmodel import Session, select, desc
 
 from TruckRouteApp.db import DEFAULT_DB_PATH, session_context
@@ -162,7 +162,7 @@ class DatabaseService:
 
     def _generate_order_id(self, session: Session, created_at: datetime) -> str:
         prefix = created_at.strftime("%d%m%Y")
-        stmt = select(Order.id).where(Order.id.like(f"{prefix}%"))
+        stmt = select(Order.id).where(cast(Order.id, String).like(f"{prefix}%"))
         existing_ids = session.exec(stmt).all()
         max_suffix = 0
         for value in existing_ids:
