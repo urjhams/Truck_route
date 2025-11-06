@@ -52,9 +52,14 @@ CUSTOMERS(
 ITEMS(
     id INTEGER PRIMARY KEY,
     name TEXT,
-    weight_per_ctn REAL,
-    ctn_per_pallet INTEGER
+    ktn_per_pal INTEGER,
+    items_per_ktn TEXT,
+    price_gross REAL,
+    price_net REAL,
+    tax TEXT
 )
+
+Note: Item `id` values are user-managed strings. New items must be created with an explicit unique ID (e.g., SKU) both in the UI dialog and the CSV importer.
 
 ORDERS(
     id INTEGER PRIMARY KEY,
@@ -66,7 +71,7 @@ ORDER_LINES(
     id INTEGER PRIMARY KEY,
     order_id INTEGER REFERENCES ORDERS(id),
     customer_id INTEGER REFERENCES CUSTOMERS(id),
-    item_id INTEGER REFERENCES ITEMS(id),
+    item_id TEXT REFERENCES ITEMS(id),
     qty INTEGER
 )
 ```

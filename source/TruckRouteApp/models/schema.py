@@ -33,10 +33,13 @@ class Item(SQLModel, table=True):
     __tablename__: str = "ITEMS"
     __tablename__ = "ITEMS"
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: Optional[str] = Field(default=None, primary_key=True)
     name: str = Field(index=True, nullable=False)
-    weight_per_ctn: Optional[float] = Field(default=None)
-    ctn_per_pallet: Optional[int] = Field(default=None)
+    ktn_per_pal: Optional[int] = Field(default=None)
+    items_per_ktn: Optional[str] = Field(default=None)
+    price_gross: Optional[float] = Field(default=None)
+    price_net: Optional[float] = Field(default=None)
+    tax: Optional[str] = Field(default=None)
 
 class Order(SQLModel, table=True):
     __tablename__: str = "ORDERS"
@@ -53,7 +56,7 @@ class OrderLine(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     order_id: int = Field(foreign_key="ORDERS.id", nullable=False)
     customer_id: int = Field(foreign_key="CUSTOMERS.id", nullable=False)
-    item_id: int = Field(foreign_key="ITEMS.id", nullable=False)
+    item_id: str = Field(foreign_key="ITEMS.id", nullable=False)
     pallets: float = Field(default=0.0, nullable=False)
 
 

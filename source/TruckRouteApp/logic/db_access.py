@@ -88,16 +88,28 @@ class DatabaseService:
     # --- Items ----------------------------------------------------------
     def list_items(self) -> List[Item]:
         with self.session() as session:
-            return list(session.exec(select(Item).order_by(Item.name)).all())
+            return list(session.exec(select(Item).order_by(Item.id)).all())
 
     def save_item(self, item: Item) -> Item:
         with self.session() as session:
+            if item.id is not None:
+                existing = session.get(Item, item.id)
+                if existing:
+                    existing.name = item.name
+                    existing.ktn_per_pal = item.ktn_per_pal
+                    existing.items_per_ktn = item.items_per_ktn
+                    existing.price_gross = item.price_gross
+                    existing.price_net = item.price_net
+                    existing.tax = item.tax
+                    session.commit()
+                    session.refresh(existing)
+                    return existing
             session.add(item)
             session.commit()
             session.refresh(item)
             return item
 
-    def delete_item(self, item_id: int) -> None:
+    def delete_item(self, item_id: str) -> None:
         with self.session() as session:
             item = session.get(Item, item_id)
             if item:

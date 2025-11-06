@@ -359,30 +359,56 @@ class CustomerDialog(QDialog):
 
 
 class ItemDialog(QDialog):
-    """Modal editor for product items with optional weight and carton metadata."""
+    """Modal editor for product items with optional packaging and pricing metadata."""
 
     def __init__(self, item: Optional[Item] = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Item")
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(460)
         self.item = item or Item(name="")
 
         form = QFormLayout(self)
+        self.id_edit = QLineEdit("" if self.item.id is None else str(self.item.id), self)
+        self.id_edit.setMinimumWidth(160)
+        if self.item.id is not None:
+            self.id_edit.setReadOnly(True)
+        else:
+            self.id_edit.setPlaceholderText("Required")
+        form.addRow("ID", self.id_edit)
+
         self.name_edit = QLineEdit(self.item.name, self)
         self.name_edit.setMinimumWidth(300)
-        self.weight_edit = QLineEdit(
-            "" if self.item.weight_per_ctn is None else str(self.item.weight_per_ctn),
+        self.ktn_per_pal_edit = QLineEdit(
+            "" if self.item.ktn_per_pal is None else str(self.item.ktn_per_pal),
             self,
         )
-        self.weight_edit.setMinimumWidth(140)
-        self.ctn_edit = QLineEdit(
-            "" if self.item.ctn_per_pallet is None else str(self.item.ctn_per_pallet),
+        self.ktn_per_pal_edit.setMinimumWidth(160)
+        self.items_per_ktn_edit = QLineEdit(
+            "" if self.item.items_per_ktn is None else self.item.items_per_ktn,
             self,
         )
-        self.ctn_edit.setMinimumWidth(140)
+        self.items_per_ktn_edit.setMinimumWidth(160)
+        self.price_gross_edit = QLineEdit(
+            "" if self.item.price_gross is None else str(self.item.price_gross),
+            self,
+        )
+        self.price_gross_edit.setMinimumWidth(160)
+        self.price_net_edit = QLineEdit(
+            "" if self.item.price_net is None else str(self.item.price_net),
+            self,
+        )
+        self.price_net_edit.setMinimumWidth(160)
+        self.tax_edit = QLineEdit(
+            "" if self.item.tax is None else self.item.tax,
+            self,
+        )
+        self.tax_edit.setMinimumWidth(160)
         form.addRow("Name", self.name_edit)
-        form.addRow("Weight per ctn", self.weight_edit)
-        form.addRow("Ctn per pallet", self.ctn_edit)
+        form.addRow("KTN per Pal", self.ktn_per_pal_edit)
+        form.addRow("Items per KTN", self.items_per_ktn_edit)
+        form.addRow("Price (gross)", self.price_gross_edit)
+        form.addRow("Price (net)", self.price_net_edit)
+        form.addRow("Tax", self.tax_edit)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, parent=self)
         buttons.accepted.connect(self.accept)
@@ -398,21 +424,42 @@ class ItemDialog(QDialog):
             if self.exec() != QDialog.DialogCode.Accepted:
                 return None
 
-            try:
-                weight = float(self.weight_edit.text()) if self.weight_edit.text() else None
-            except ValueError:
-                QMessageBox.warning(self, "Validation error", "Weight must be numeric.")
+            id_text = self.id_edit.text().strip()
+            if not id_text:
+                QMessageBox.warning(self, "Validation error", "ID is required.")
                 continue
 
             try:
-                ctn = int(self.ctn_edit.text()) if self.ctn_edit.text() else None
+                ktn_per_pal = int(self.ktn_per_pal_edit.text()) if self.ktn_per_pal_edit.text().strip() else None
             except ValueError:
-                QMessageBox.warning(self, "Validation error", "Cartons per pallet must be integer.")
+                QMessageBox.warning(self, "Validation error", "KTN per Pal must be an integer.")
                 continue
 
+            items_per_ktn_text = self.items_per_ktn_edit.text().strip()
+            items_per_ktn = items_per_ktn_text if items_per_ktn_text else None
+
+            try:
+                price_gross = float(self.price_gross_edit.text()) if self.price_gross_edit.text().strip() else None
+            except ValueError:
+                QMessageBox.warning(self, "Validation error", "Price (gross) must be numeric.")
+                continue
+
+            try:
+                price_net = float(self.price_net_edit.text()) if self.price_net_edit.text().strip() else None
+            except ValueError:
+                QMessageBox.warning(self, "Validation error", "Price (net) must be numeric.")
+                continue
+
+            tax_text = self.tax_edit.text().strip()
+            tax = tax_text if tax_text else None
+
+            self.item.id = id_text
             self.item.name = self.name_edit.text()
-            self.item.weight_per_ctn = weight
-            self.item.ctn_per_pallet = ctn
+            self.item.ktn_per_pal = ktn_per_pal
+            self.item.items_per_ktn = items_per_ktn
+            self.item.price_gross = price_gross
+            self.item.price_net = price_net
+            self.item.tax = tax
             return self.item
 
 
@@ -622,16 +669,20 @@ class ItemView(BaseCrudView):
         super().__init__(parent)
         self.db = db
         columns = [
+            ColumnConfig("ID", lambda item: item.id),
             ColumnConfig("Name", lambda item: item.name),
-            ColumnConfig("Weight/ctn", lambda item: item.weight_per_ctn or ""),
-            ColumnConfig("Cartons/pallet", lambda item: item.ctn_per_pallet or ""),
+            ColumnConfig("KTN/pal", lambda item: item.ktn_per_pal or ""),
+            ColumnConfig("Items/KTN", lambda item: item.items_per_ktn or ""),
+            ColumnConfig("Price (gross)", lambda item: f"{item.price_gross:.2f}" if item.price_gross is not None else ""),
+            ColumnConfig("Price (net)", lambda item: f"{item.price_net:.2f}" if item.price_net is not None else ""),
+            ColumnConfig("Tax", lambda item: item.tax or ""),
         ]
         self.model = SQLModelTableModel(columns, self)
         self.set_model(self.model)
         self.refresh()
-                
-        self.table.horizontalHeader().setMinimumSectionSize(100)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)   # strech Name column
+
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # stretch Name column
 
         self.add_button.clicked.connect(self.add)
         self.edit_button.clicked.connect(self.edit)
@@ -701,18 +752,26 @@ class ItemView(BaseCrudView):
                 mapping_dialog = CSVMappingDialog(
                     headers,
                     [
+                        ("id", "ID", True),
                         ("name", "Name", True),
-                        ("weight_per_ctn", "Weight per ctn", False),
-                        ("ctn_per_pallet", "Cartons per pallet", False),
+                        ("ktn_per_pal", "KTN per Pal", False),
+                        ("items_per_ktn", "Items per KTN", False),
+                        ("price_gross", "Price (gross)", False),
+                        ("price_net", "Price (net)", False),
+                        ("tax", "Tax", False),
                     ],
                     self,
                 )
                 mapping = mapping_dialog.get_mapping()
                 if not mapping:
                     return
+                id_col = mapping["id"]
                 name_col = mapping["name"]
-                weight_col = mapping.get("weight_per_ctn")
-                ctn_col = mapping.get("ctn_per_pallet")
+                ktn_col = mapping.get("ktn_per_pal")
+                items_col = mapping.get("items_per_ktn")
+                price_gross_col = mapping.get("price_gross")
+                price_net_col = mapping.get("price_net")
+                tax_col = mapping.get("tax")
                 imported = 0
                 skipped = 0
                 errors: List[str] = []
@@ -720,20 +779,47 @@ class ItemView(BaseCrudView):
                     if not any(row.values()):
                         continue
                     try:
+                        id_value = (row.get(id_col) or "").strip()
+                        if not id_value:
+                            raise ValueError("missing id")
+                        item_id = id_value
                         name = (row.get(name_col) or "").strip()
                         if not name:
                             raise ValueError("missing name")
-                        weight = None
-                        if weight_col:
-                            weight_str = (row.get(weight_col) or "").strip()
-                            if weight_str:
-                                weight = float(weight_str)
-                        ctn = None
-                        if ctn_col:
-                            ctn_str = (row.get(ctn_col) or "").strip()
-                            if ctn_str:
-                                ctn = int(float(ctn_str))
-                        item = Item(name=name, weight_per_ctn=weight, ctn_per_pallet=ctn)
+                        ktn_per_pal = None
+                        if ktn_col:
+                            ktn_str = (row.get(ktn_col) or "").strip()
+                            if ktn_str:
+                                ktn_per_pal = int(float(ktn_str))
+                        items_per_ktn = None
+                        if items_col:
+                            items_str = (row.get(items_col) or "").strip()
+                            if items_str:
+                                items_per_ktn = items_str
+                        price_gross = None
+                        if price_gross_col:
+                            gross_str = (row.get(price_gross_col) or "").strip()
+                            if gross_str:
+                                price_gross = float(gross_str)
+                        price_net = None
+                        if price_net_col:
+                            net_str = (row.get(price_net_col) or "").strip()
+                            if net_str:
+                                price_net = float(net_str)
+                        tax = None
+                        if tax_col:
+                            tax_str = (row.get(tax_col) or "").strip()
+                            if tax_str:
+                                tax = tax_str
+                        item = Item(
+                            id=item_id,
+                            name=name,
+                            ktn_per_pal=ktn_per_pal,
+                            items_per_ktn=items_per_ktn,
+                            price_gross=price_gross,
+                            price_net=price_net,
+                            tax=tax,
+                        )
                         self.db.save_item(item)
                         imported += 1
                     except Exception as exc:  # noqa: BLE001
