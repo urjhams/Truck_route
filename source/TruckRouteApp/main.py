@@ -513,10 +513,7 @@ class CustomerView(BaseCrudView):
                 address_col = mapping.get("address")
                 lat_col = mapping["lat"]
                 lng_col = mapping["lng"]
-                imported = 0
-                skipped = 0
-                errors: List[str] = []
-                for row_num, row in enumerate(reader, start=2):
+                for row in reader:
                     if not any(row.values()):
                         continue
                     try:
@@ -533,24 +530,16 @@ class CustomerView(BaseCrudView):
                             lng_str = (row.get(lng_col) or "").strip()
                             if lng_str:
                                 lng = float(lng_str)
-                        address = (row.get(address_col) or "").strip() if address_col else ""
-                        customer = Customer(name=name, address=address or None, lat=lat, lng=lng)
+                        address_value = (row.get(address_col) or "").strip() if address_col else ""
+                        address = address_value or None
+                        if self.db.customer_exists(name, address):
+                            continue
+                        customer = Customer(name=name, address=address, lat=lat, lng=lng)
                         self.db.save_customer(customer)
-                        imported += 1
-                    except Exception as exc:  # noqa: BLE001
-                        skipped += 1
-                        errors.append(f"Row {row_num}: {exc}")
+                    except Exception:  # noqa: BLE001
+                        # Rows with format issues are ignored silently; only critical errors are shown.
+                        continue
                 self.refresh()
-                summary = f"Imported {imported} customer(s)."
-                if skipped:
-                    summary += f" Skipped {skipped} row(s)."
-                if errors:
-                    details = "\n".join(errors[:5])
-                    if len(errors) > 5:
-                        details += "\n..."
-                    QMessageBox.warning(self, "Import completed with issues", summary + "\n\n" + details)
-                else:
-                    QMessageBox.information(self, "Import complete", summary)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Import error", str(exc))
 

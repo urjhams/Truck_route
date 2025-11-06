@@ -7,6 +7,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Generator, List, Optional, Sequence
 
+from sqlalchemy import func
 from sqlmodel import Session, select, desc
 
 from TruckRouteApp.db import DEFAULT_DB_PATH, session_context
@@ -60,6 +61,22 @@ class DatabaseService:
             session.commit()
             session.refresh(customer)
             return customer
+
+    def customer_exists(self, name: str, address: Optional[str]) -> bool:
+        """
+        Return True when a customer with the same name/address already exists.
+        Comparison is case-insensitive and treats missing addresses as blank.
+        """
+        normalized_name = name.strip().lower()
+        normalized_address = (address or "").strip().lower()
+        with self.session() as session:
+            stmt = (
+                select(Customer.id)
+                .where(func.lower(Customer.name) == normalized_name)
+                .where(func.lower(func.coalesce(Customer.address, "")) == normalized_address)
+                .limit(1)
+            )
+            return session.exec(stmt).first() is not None
 
     def delete_customer(self, customer_id: int) -> None:
         with self.session() as session:
