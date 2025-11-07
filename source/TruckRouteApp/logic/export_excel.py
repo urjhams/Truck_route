@@ -115,11 +115,56 @@ def _apply_grid_border(
     min_col: int,
     max_col: int,
 ) -> None:
-    merged = list(worksheet.merged_cells.ranges)
-    for row in worksheet.iter_rows(min_row=min_row, max_row=max_row, min_col=min_col, max_col=max_col):
-        for cell in row:
-            if _can_edit_cell(cell, merged):
-                cell.border = _THIN_BORDER
+    """
+    Draw a cleaner table border:
+    - Outer border around the whole table region
+    - Vertical borders only at: end of items section, and end of address column
+    - Horizontal border only under final item of each customer block (caller passes correct max_row)
+    """
+
+    # Outer rectangle around the table
+    for col in range(min_col, max_col + 1):
+        top = worksheet.cell(row=min_row, column=col)
+        bottom = worksheet.cell(row=max_row, column=col)
+        top.border = Border(top=_THIN_SIDE, left=top.border.left, right=top.border.right, bottom=top.border.bottom)
+        bottom.border = Border(bottom=_THIN_SIDE, left=bottom.border.left, right=bottom.border.right, top=bottom.border.top)
+
+    for row in range(min_row, max_row + 1):
+        left = worksheet.cell(row=row, column=min_col)
+        right = worksheet.cell(row=row, column=max_col)
+        left.border = Border(left=_THIN_SIDE, top=left.border.top, right=left.border.right, bottom=left.border.bottom)
+        right.border = Border(right=_THIN_SIDE, top=right.border.top, left=right.border.left, bottom=right.border.bottom)
+
+    # Vertical border after items column group (ktn col)
+    divider_col = _COLUMN_ITEM_START + 5
+    for row in range(min_row, max_row + 1):
+        cell = worksheet.cell(row=row, column=divider_col)
+        cell.border = Border(
+            right=_THIN_SIDE,
+            left=cell.border.left,
+            top=cell.border.top,
+            bottom=cell.border.bottom,
+        )
+
+    # Vertical border after address column
+    for row in range(min_row, max_row + 1):
+        cell = worksheet.cell(row=row, column=_COLUMN_SECONDARY)
+        cell.border = Border(
+            right=_THIN_SIDE,
+            left=cell.border.left,
+            top=cell.border.top,
+            bottom=cell.border.bottom,
+        )
+
+    # Horizontal separator under full customer block (final row)
+    for col in range(min_col, max_col + 1):
+        cell = worksheet.cell(row=max_row, column=col)
+        cell.border = Border(
+            bottom=_THIN_SIDE,
+            top=cell.border.top,
+            left=cell.border.left,
+            right=cell.border.right,
+        )
 
 
 def _normalized_number(value: Optional[float]) -> Optional[float]:
