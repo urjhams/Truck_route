@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import csv
 import sys
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -43,6 +44,22 @@ from TruckRouteApp.logic.db_access import DatabaseService
 from TruckRouteApp.logic.export_excel import DEFAULT_TEMPLATE, RouteExcelRow, export_route_to_excel
 from TruckRouteApp.logic.routing_local import Stop, RouteResult, haversine_meters, optimise_route
 from TruckRouteApp.models.schema import Customer, Item, Order, OrderLine, Warehouse
+
+
+_ACTIVE_ROUTE_THREADS: List[QThread] = []
+
+
+def _register_route_thread(thread: QThread) -> None:
+    """Keep QThread instances alive until they finish, even if dialogs close."""
+    _ACTIVE_ROUTE_THREADS.append(thread)
+
+    def _cleanup() -> None:
+        with suppress(ValueError):
+            _ACTIVE_ROUTE_THREADS.remove(thread)
+        with suppress(RuntimeError):
+            thread.finished.disconnect(_cleanup)
+
+    thread.finished.connect(_cleanup)
 
 
 class ColumnConfig:
@@ -1196,6 +1213,8 @@ class OrderDialog(QDialog):
         self.line_table.setColumnWidth(4, 110)
         layout.addWidget(QLabel("Order Lines"))
         layout.addWidget(self.line_table)
+        self._line_table_updates_blocked = False
+        self.line_table.itemChanged.connect(self._on_line_cell_changed)
 
         line_buttons = QHBoxLayout()
         layout.addLayout(line_buttons)
@@ -1269,7 +1288,7 @@ class OrderDialog(QDialog):
                 customer=customer,
                 item=item,
                 pallets=record.pallets,
-                ktn_per_pal=item.ktn_per_pal,
+                ktn_per_pal=record.ktn_per_pal if record.ktn_per_pal is not None else item.ktn_per_pal,
             )
             self.lines.append(entry)
             self._insert_line_row(entry)
@@ -1279,6 +1298,12 @@ class OrderDialog(QDialog):
                 "Missing references",
                 "Some order lines reference customers or items that no longer exist and were skipped.",
             )
+        self._invalidate_route_preview()
+
+    def _invalidate_route_preview(self) -> None:
+        """Clear any stale route preview data after editing the lines."""
+        self.current_stops = []
+        self.route_order = []
         self.route_list.clear()
         self.export_button.setEnabled(False)
         self.route_status_label.clear()
@@ -1286,14 +1311,41 @@ class OrderDialog(QDialog):
     def _insert_line_row(self, entry: OrderLineEntry) -> None:
         """Append a table row for the provided line entry."""
         row = self.line_table.rowCount()
-        self.line_table.insertRow(row)
-        self.line_table.setItem(row, 0, QTableWidgetItem(entry.customer.name))
-        self.line_table.setItem(row, 1, QTableWidgetItem(entry.item.name))
-        self.line_table.setItem(row, 2, QTableWidgetItem(self._format_pallets(entry.pallets)))
-        self.line_table.setItem(row, 3, QTableWidgetItem(self._format_optional(entry.ktn_per_pal)))
+        self._line_table_updates_blocked = True
+        try:
+            self.line_table.insertRow(row)
+            self.line_table.setItem(row, 0, self._create_line_table_item(entry.customer.name))
+            self.line_table.setItem(row, 1, self._create_line_table_item(entry.item.name))
+            self.line_table.setItem(
+                row,
+                2,
+                self._create_line_table_item(self._format_pallets(entry.pallets), editable=True),
+            )
+            self.line_table.setItem(
+                row,
+                3,
+                self._create_line_table_item(self._format_optional(entry.ktn_per_pal), editable=True),
+            )
+        finally:
+            self._line_table_updates_blocked = False
         remove_btn = QPushButton("Remove", self.line_table)
         remove_btn.clicked.connect(lambda _, btn=remove_btn: self._remove_line_via_button(btn))
         self.line_table.setCellWidget(row, 4, remove_btn)
+
+    def _create_line_table_item(self, text: str, editable: bool = False) -> QTableWidgetItem:
+        """Create a table item with consistent flags for editable/non-editable cells."""
+        item = QTableWidgetItem(text)
+        self._apply_line_item_flags(item, editable)
+        return item
+
+    def _apply_line_item_flags(self, item: QTableWidgetItem, editable: bool) -> None:
+        flags = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
+        if editable:
+            flags |= Qt.ItemFlag.ItemIsEditable
+            item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        else:
+            item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        item.setFlags(flags)
 
     @staticmethod
     def _format_pallets(value: float) -> str:
@@ -1344,33 +1396,85 @@ class OrderDialog(QDialog):
                 self.lines.append(entry)
                 self._insert_line_row(entry)
 
-        self.route_list.clear()
-        self.export_button.setEnabled(False)
-        self.route_status_label.clear()
+        self._invalidate_route_preview()
 
     def _update_line_row(self, row: int, entry: OrderLineEntry) -> None:
         """Refresh the UI table cells to mirror the provided order line entry."""
         values = [
-            entry.customer.name,
-            entry.item.name,
-            self._format_pallets(entry.pallets),
-            self._format_optional(entry.ktn_per_pal),
+            (entry.customer.name, False),
+            (entry.item.name, False),
+            (self._format_pallets(entry.pallets), True),
+            (self._format_optional(entry.ktn_per_pal), True),
         ]
-        for col, value in enumerate(values):
-            item = self.line_table.item(row, col)
-            if item is None:
-                self.line_table.setItem(row, col, QTableWidgetItem(value))
-            else:
-                item.setText(value)
+        self._line_table_updates_blocked = True
+        try:
+            for col, (value, editable) in enumerate(values):
+                item = self.line_table.item(row, col)
+                if item is None:
+                    self.line_table.setItem(row, col, self._create_line_table_item(value, editable))
+                else:
+                    self._apply_line_item_flags(item, editable)
+                    item.setText(value)
+        finally:
+            self._line_table_updates_blocked = False
 
     def _remove_line_at(self, row: int):
         """Remove a row from both state and table, clearing stale route previews."""
         if 0 <= row < len(self.lines):
             self.lines.pop(row)
             self.line_table.removeRow(row)
-        self.route_list.clear()
-        self.export_button.setEnabled(False)
-        self.route_status_label.clear()
+        self._invalidate_route_preview()
+
+    def _on_line_cell_changed(self, item: QTableWidgetItem) -> None:
+        """Apply in-table edits to the backing OrderLineEntry objects."""
+        if self._line_table_updates_blocked:
+            return
+        if item is None:
+            return
+        row = item.row()
+        col = item.column()
+        if row < 0 or row >= len(self.lines):
+            return
+        entry = self.lines[row]
+        text = item.text().strip()
+
+        def reject(message: str) -> None:
+            QMessageBox.warning(self, "Invalid value", message)
+            self._update_line_row(row, entry)
+
+        if col == 2:
+            if not text:
+                reject("Pallet count cannot be empty.")
+                return
+            try:
+                pallets = float(text)
+            except ValueError:
+                reject("Pallet count must be a number.")
+                return
+            if pallets <= 0:
+                reject("Pallet count must be greater than zero.")
+                return
+            entry.pallets = pallets
+        elif col == 3:
+            if not text or text == "-":
+                entry.ktn_per_pal = None
+            else:
+                try:
+                    ktn = float(text)
+                except ValueError:
+                    reject("Karton per pallet must be a number.")
+                    return
+                if ktn <= 0:
+                    reject("Karton per pallet must be greater than zero.")
+                    return
+                entry.ktn_per_pal = ktn
+        else:
+            # Keep name columns immutable by restoring their source values.
+            self._update_line_row(row, entry)
+            return
+
+        self._update_line_row(row, entry)
+        self._invalidate_route_preview()
 
     def _remove_line_via_button(self, button: QPushButton) -> None:
         """Delete the table row associated with a remove button."""
@@ -1427,7 +1531,8 @@ class OrderDialog(QDialog):
         self.route_status_label.setText("Calculating route...")
 
         worker = RouteCalculationWorker(stops, return_to_depot=True)
-        thread = QThread(self)
+        thread = QThread()
+        _register_route_thread(thread)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.finished.connect(self._on_route_finished)
@@ -1489,17 +1594,26 @@ class OrderDialog(QDialog):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Ensure background processing stops cleanly before the dialog is destroyed."""
-        self._shutdown_route_thread()
+        self._cancel_route_calculation()
         super().closeEvent(event)
 
-    def _shutdown_route_thread(self) -> None:
-        """Stop the route calculation thread (if running) and release references."""
+    def _cancel_route_calculation(self) -> None:
+        """Abort any inflight routing work without blocking the UI."""
         thread = self.route_thread
-        if thread and thread.isRunning():
-            thread.quit()
-            thread.wait()
+        if not thread:
+            return
+        worker = self.route_worker
+        if worker:
+            with suppress(RuntimeError, TypeError):
+                worker.finished.disconnect(self._on_route_finished)
+        with suppress(RuntimeError, TypeError):
+            thread.finished.disconnect(self._on_route_thread_finished)
+        thread.requestInterruption()
+        thread.quit()
         self.route_thread = None
         self.route_worker = None
+        self.route_status_label.clear()
+        self.estimate_button.setEnabled(True)
 
     def export_route(self):
         """Convert the current previewed route into an Excel workbook."""
@@ -1607,6 +1721,7 @@ class OrderDialog(QDialog):
                     customer_id=entry.customer.id,
                     item_id=entry.item.id,
                     pallets=entry.pallets,
+                    ktn_per_pal=entry.ktn_per_pal,
                 )
             )
         return order, order_lines

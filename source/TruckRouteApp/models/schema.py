@@ -58,6 +58,7 @@ class OrderLine(SQLModel, table=True):
     customer_id: str = Field(foreign_key="CUSTOMERS.id", nullable=False)
     item_id: str = Field(foreign_key="ITEMS.id", nullable=False)
     pallets: float = Field(default=0.0, nullable=False)
+    ktn_per_pal: Optional[float] = Field(default=None, nullable=True)
 
 
 __all__ = [

@@ -73,6 +73,7 @@ def _run_migrations(engine) -> None:
         _ensure_customers_lat_lng_nullable(conn)
         _ensure_items_optional_columns(conn)
         _ensure_order_lines_item_id_text(conn)
+        _ensure_order_lines_ktn_column(conn)
         _ensure_orders_id_text(conn)
 
 
@@ -221,20 +222,35 @@ def _ensure_order_lines_item_id_text(conn) -> None:
             order_id INTEGER REFERENCES ORDERS(id),
             customer_id TEXT REFERENCES CUSTOMERS(id),
             item_id TEXT REFERENCES ITEMS(id),
-            pallets REAL NOT NULL DEFAULT 0.0
+            pallets REAL NOT NULL DEFAULT 0.0,
+            ktn_per_pal REAL
         );
         """
     )
     conn.exec_driver_sql(
         """
-        INSERT INTO __ORDER_LINES_NEW (id, order_id, customer_id, item_id, pallets)
-        SELECT id, order_id, CAST(customer_id AS TEXT), CAST(item_id AS TEXT), pallets
+        INSERT INTO __ORDER_LINES_NEW (id, order_id, customer_id, item_id, pallets, ktn_per_pal)
+        SELECT id, order_id, CAST(customer_id AS TEXT), CAST(item_id AS TEXT), pallets, ktn_per_pal
         FROM ORDER_LINES;
         """
     )
     conn.exec_driver_sql("DROP TABLE ORDER_LINES;")
     conn.exec_driver_sql('ALTER TABLE __ORDER_LINES_NEW RENAME TO "ORDER_LINES";')
     conn.exec_driver_sql("PRAGMA foreign_keys=on;")
+
+
+def _ensure_order_lines_ktn_column(conn) -> None:
+    table_exists = conn.exec_driver_sql(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='ORDER_LINES';"
+    ).fetchone()
+    if not table_exists:
+        return
+
+    columns = conn.exec_driver_sql('PRAGMA table_info("ORDER_LINES");').fetchall()
+    existing = {row[1].lower() for row in columns}
+    if "ktn_per_pal" in existing:
+        return
+    conn.exec_driver_sql('ALTER TABLE "ORDER_LINES" ADD COLUMN ktn_per_pal REAL;')
 
 
 def _ensure_orders_id_text(conn) -> None:
