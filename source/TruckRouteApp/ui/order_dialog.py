@@ -32,7 +32,12 @@ from PySide6.QtWidgets import (
 )
 
 from TruckRouteApp.logic.db_access import DatabaseService
-from TruckRouteApp.logic.export_excel import DEFAULT_TEMPLATE, RouteExcelRow, export_route_to_excel
+from TruckRouteApp.logic.export_excel import (
+    DEFAULT_TEMPLATE,
+    RouteExcelItem,
+    RouteExcelRow,
+    export_route_to_excel,
+)
 from TruckRouteApp.logic.routing_local import RouteResult, Stop, optimise_route
 from TruckRouteApp.models.schema import Customer, Item, Order, OrderLine, Warehouse
 
@@ -622,30 +627,57 @@ class OrderDialog(QDialog):
             return
 
         warehouse: Warehouse = self.warehouse_combo.currentData()
-        rows: List[RouteExcelRow] = []
-        stops = self.current_stops
-        for idx in [0, *self.route_order, 0]:
-            stop = stops[idx]
-            customer = self.stop_index_to_customer.get(idx)
-            rows.append(
-                RouteExcelRow(
-                    name=stop.name,
-                    lat=stop.lat,
-                    lng=stop.lng,
-                    id=customer.id if customer else None,
-                    address=customer.address if customer else warehouse.address,
-                    pallets=sum(entry.pallets for entry in self.lines if entry.customer.id == customer.id)
-                    if customer
-                    else 0,
+        if not warehouse:
+            QMessageBox.warning(self, "Missing warehouse", "Select a warehouse before exporting.")
+            return
+
+        def _customer_key(customer: Customer) -> str:
+            return customer.id or f"customer-{id(customer)}"
+
+        customer_items: dict[str, List[RouteExcelItem]] = {}
+        for entry in self.lines:
+            key = _customer_key(entry.customer)
+            customer_items.setdefault(key, [])
+            ktn = entry.ktn_per_pal
+            if ktn is None:
+                ktn = entry.item.ktn_per_pal
+            customer_items[key].append(
+                RouteExcelItem(
+                    item_name=entry.item.name,
+                    pallets=entry.pallets,
+                    cartons_per_pallet=ktn,
                 )
             )
-        metadata = {
-            "Warehouse": warehouse.name,
-            "Generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "Stops": str(len(rows) - 1),
-        }
+
+        rows: List[RouteExcelRow] = []
+        for idx in self.route_order:
+            customer = self.stop_index_to_customer.get(idx)
+            if not customer:
+                continue
+            key = _customer_key(customer)
+            rows.append(
+                RouteExcelRow(
+                    customer_name=customer.name,
+                    address=customer.address,
+                    items=list(customer_items.get(key, [])),
+                    customer_id=customer.id,
+                )
+            )
+
+        if not rows:
+            QMessageBox.warning(self, "No route stops", "Add lines and estimate the route before exporting.")
+            return
+
+        order_date = self.order.created_at if (self.order and self.order.created_at) else datetime.now()
+        total_pallets = sum(entry.pallets for entry in self.lines)
         try:
-            export_route_to_excel(Path(path), rows, metadata=metadata, template_path=DEFAULT_TEMPLATE)
+            export_route_to_excel(
+                Path(path),
+                rows,
+                order_date=order_date,
+                total_pallets=total_pallets,
+                template_path=DEFAULT_TEMPLATE,
+            )
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Export error", str(exc))
             return
