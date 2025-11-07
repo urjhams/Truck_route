@@ -142,6 +142,33 @@ class DatabaseService:
             session.refresh(order)
             return order
 
+    def update_order_with_lines(
+        self,
+        order: Order,
+        lines: Sequence[OrderLine],
+    ) -> Order:
+        if order.id is None:
+            raise ValueError("Order must have an ID to update.")
+        with self.session() as session:
+            existing = session.get(Order, order.id)
+            if not existing:
+                raise ValueError(f"Order '{order.id}' does not exist.")
+            existing.warehouse_id = order.warehouse_id
+
+            current_lines = session.exec(
+                select(OrderLine).where(OrderLine.order_id == order.id)
+            ).all()
+            for line in current_lines:
+                session.delete(line)
+
+            for line in lines:
+                line.order_id = order.id
+                session.add(line)
+
+            session.commit()
+            session.refresh(existing)
+            return existing
+
     def list_order_lines(self, order_id: str) -> List[OrderLine]:
         with self.session() as session:
             return list(session.exec(

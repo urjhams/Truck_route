@@ -1130,10 +1130,16 @@ class OrderDialog(QDialog):
     the route, and optionally export to Excel before confirming.
     """
 
-    def __init__(self, db: DatabaseService, parent=None):
+    def __init__(self, db: DatabaseService, parent=None, order: Optional[Order] = None):
         super().__init__(parent)
         self.db = db
-        self.setWindowTitle("Create Order")
+        self.order = order
+        if self.order and self.order.id:
+            self.setWindowTitle(f"Edit Order #{self.order.id}")
+        elif self.order:
+            self.setWindowTitle("Edit Order")
+        else:
+            self.setWindowTitle("Create Order")
         self.resize(720, 500)
         self.setMinimumWidth(900)
 
@@ -1174,6 +1180,8 @@ class OrderDialog(QDialog):
             self.warehouse_combo.addItem(warehouse.name, warehouse)
         self.warehouse_combo.setMinimumWidth(260)
         form_layout.addRow("Warehouse", self.warehouse_combo)
+        if self.order:
+            self._select_order_warehouse()
 
         self.line_table = QTableWidget(0, 5, self)
         self.line_table.setHorizontalHeaderLabels(["Customer", "Product", "Pallets", "Karton/Pal", ""])
@@ -1230,6 +1238,62 @@ class OrderDialog(QDialog):
         self.stop_index_to_customer: dict[int, Customer] = {}
         self.route_thread: Optional[QThread] = None
         self.route_worker: Optional[RouteCalculationWorker] = None
+        if self.order:
+            self._populate_from_order()
+
+    def _select_order_warehouse(self) -> None:
+        """Pre-select the warehouse tied to the order being edited."""
+        if not self.order:
+            return
+        target_id = self.order.warehouse_id
+        for idx in range(self.warehouse_combo.count()):
+            warehouse: Optional[Warehouse] = self.warehouse_combo.itemData(idx)
+            if warehouse and warehouse.id == target_id:
+                self.warehouse_combo.setCurrentIndex(idx)
+                break
+
+    def _populate_from_order(self) -> None:
+        """Load persisted order lines into the editable table."""
+        if not self.order or not self.order.id:
+            return
+        customers_by_id = {customer.id: customer for customer in self.customers_all if customer.id is not None}
+        items_by_id = {item.id: item for item in self.items if item.id is not None}
+        missing_references = False
+        for record in self.db.list_order_lines(self.order.id):
+            customer = customers_by_id.get(record.customer_id)
+            item = items_by_id.get(record.item_id)
+            if not customer or not item:
+                missing_references = True
+                continue
+            entry = OrderLineEntry(
+                customer=customer,
+                item=item,
+                pallets=record.pallets,
+                ktn_per_pal=item.ktn_per_pal,
+            )
+            self.lines.append(entry)
+            self._insert_line_row(entry)
+        if missing_references:
+            QMessageBox.warning(
+                self,
+                "Missing references",
+                "Some order lines reference customers or items that no longer exist and were skipped.",
+            )
+        self.route_list.clear()
+        self.export_button.setEnabled(False)
+        self.route_status_label.clear()
+
+    def _insert_line_row(self, entry: OrderLineEntry) -> None:
+        """Append a table row for the provided line entry."""
+        row = self.line_table.rowCount()
+        self.line_table.insertRow(row)
+        self.line_table.setItem(row, 0, QTableWidgetItem(entry.customer.name))
+        self.line_table.setItem(row, 1, QTableWidgetItem(entry.item.name))
+        self.line_table.setItem(row, 2, QTableWidgetItem(self._format_pallets(entry.pallets)))
+        self.line_table.setItem(row, 3, QTableWidgetItem(self._format_optional(entry.ktn_per_pal)))
+        remove_btn = QPushButton("Remove", self.line_table)
+        remove_btn.clicked.connect(lambda _, btn=remove_btn: self._remove_line_via_button(btn))
+        self.line_table.setCellWidget(row, 4, remove_btn)
 
     @staticmethod
     def _format_pallets(value: float) -> str:
@@ -1278,15 +1342,7 @@ class OrderDialog(QDialog):
                 self._update_line_row(existing_index, entry)
             else:
                 self.lines.append(entry)
-                row = self.line_table.rowCount()
-                self.line_table.insertRow(row)
-                self.line_table.setItem(row, 0, QTableWidgetItem(entry.customer.name))
-                self.line_table.setItem(row, 1, QTableWidgetItem(entry.item.name))
-                self.line_table.setItem(row, 2, QTableWidgetItem(self._format_pallets(entry.pallets)))
-                self.line_table.setItem(row, 3, QTableWidgetItem(self._format_optional(entry.ktn_per_pal)))
-                remove_btn = QPushButton("Remove", self.line_table)
-                remove_btn.clicked.connect(lambda _, btn=remove_btn: self._remove_line_via_button(btn))
-                self.line_table.setCellWidget(row, 4, remove_btn)
+                self._insert_line_row(entry)
 
         self.route_list.clear()
         self.export_button.setEnabled(False)
@@ -1524,13 +1580,16 @@ class OrderDialog(QDialog):
         warehouse: Warehouse = self.warehouse_combo.currentData()
         assert warehouse.id is not None
         order = Order(warehouse_id=warehouse.id)
+        if self.order:
+            order.id = self.order.id
+            order.created_at = self.order.created_at
         order_lines: List[OrderLine] = []
         for entry in self.lines:
             assert entry.customer.id is not None
             assert entry.item.id is not None
             order_lines.append(
                 OrderLine(
-                    order_id="",
+                    order_id=self.order.id if self.order and self.order.id else "",
                     customer_id=entry.customer.id,
                     item_id=entry.item.id,
                     pallets=entry.pallets,
@@ -1540,7 +1599,7 @@ class OrderDialog(QDialog):
 
 
 class OrderView(BaseCrudView):
-    """Read-only order list with actions to create and delete orders."""
+    """Order list with actions to create, inspect, and delete orders."""
 
     def __init__(self, db: DatabaseService, parent=None):
         super().__init__(parent)
@@ -1555,9 +1614,11 @@ class OrderView(BaseCrudView):
         self.refresh()
 
         self.add_button.setText("Create order")
-        self.edit_button.setVisible(False)
+        self.edit_button.setText("View/Edit order")
+        self.edit_button.setVisible(True)
 
         self.add_button.clicked.connect(self.create_order)
+        self.edit_button.clicked.connect(self.edit)
         self.delete_button.clicked.connect(self.delete_order)
         self.refresh_button.clicked.connect(self.refresh)
                 
@@ -1600,6 +1661,26 @@ class OrderView(BaseCrudView):
         if confirm == QMessageBox.StandardButton.Yes:
             self.db.delete_order(order.id)
             self.refresh()
+
+    def edit(self):
+        """Open the order dialog for the selected row so the user can review or edit details."""
+        index = self.selected_index()
+        if not index:
+            return
+        order = self.model.get_row(index)
+        if not order:
+            return
+        dialog = OrderDialog(self.db, self, order=order)
+        payload = dialog.get_payload()
+        if not payload:
+            return
+        updated_order, lines = payload
+        try:
+            self.db.update_order_with_lines(updated_order, lines)
+        except Exception as exc:
+            QMessageBox.critical(self, "Update error", str(exc))
+            return
+        self.refresh()
 
 
 class MainWindow(QMainWindow):
