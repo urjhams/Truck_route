@@ -246,10 +246,11 @@ def _write_item_line(worksheet: Worksheet, row_idx: int, item: RouteExcelItem) -
     )
 
 
-def _write_customer_block(worksheet: Worksheet, start_row: int, row: RouteExcelRow) -> tuple[int, int]:
+def _write_customer_block(worksheet: Worksheet, start_row: int, row: RouteExcelRow) -> tuple[int, Optional[int]]:
     """
     Write a customer block starting at start_row.
-    Returns (next_row, separator_row) where separator_row is the row index where a horizontal line should be applied.
+    Returns (next_row, separator_row) where separator_row is the row index where a horizontal line should be applied,
+    or None if no items or address lines were written for this customer.
     """
     worksheet.cell(row=start_row, column=_COLUMN_SECONDARY, value=row.customer_name)
     current_row = start_row + 1
