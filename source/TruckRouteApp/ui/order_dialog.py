@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, cast
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtGui import QDoubleValidator
@@ -105,7 +105,7 @@ class OrderLineDialog(QDialog):
         self.customers = list(customers)
         self.items = list(items)
         self.selected_lines: List[OrderLineEntry] = []
-        self._item_rows: List[dict[str, object]] = []
+        self._item_rows: List[dict[str, QWidget]] = []
 
         layout = QVBoxLayout(self)
 
@@ -209,9 +209,11 @@ class OrderLineDialog(QDialog):
         lines: List[OrderLineEntry] = []
         errors: List[str] = []
         for idx, row in enumerate(self._item_rows, start=1):
-            item: Item = row["item_combo"].currentData()
-            pallets_text = row["pallets_input"].text().strip()
-            karton_text = row["karton_input"].text().strip()
+            # row["item_combo"] is stored as a QWidget in the dict; cast it to QComboBox
+            # and cast the returned currentData() to Item so the type checker understands.
+            item: Item = cast(Item, cast(QComboBox, row["item_combo"]).currentData())
+            pallets_text = cast(QLineEdit, row["pallets_input"]).text().strip()
+            karton_text = cast(QLineEdit, row["karton_input"]).text().strip()
             if not pallets_text:
                 errors.append(f"Row {idx}: pallet count is required.")
                 continue
@@ -486,10 +488,31 @@ class OrderDialog(QDialog):
     def _update_line_row(self, row: int, entry: OrderLineEntry) -> None:
         self._line_table_updates_blocked = True
         try:
-            self.line_table.item(row, 0).setText(entry.customer.name)
-            self.line_table.item(row, 1).setText(entry.item.name)
-            self.line_table.item(row, 2).setText(self._format_pallets(entry.pallets))
-            self.line_table.item(row, 3).setText(self._format_optional(entry.ktn_per_pal))
+            # Ensure QTableWidgetItem exists for each column before updating text.
+            item0 = self.line_table.item(row, 0)
+            if item0 is None:
+                item0 = self._create_line_table_item(entry.customer.name)
+                self.line_table.setItem(row, 0, item0)
+
+            item1 = self.line_table.item(row, 1)
+            if item1 is None:
+                item1 = self._create_line_table_item(entry.item.name)
+                self.line_table.setItem(row, 1, item1)
+
+            item2 = self.line_table.item(row, 2)
+            if item2 is None:
+                item2 = self._create_line_table_item(self._format_pallets(entry.pallets), editable=True)
+                self.line_table.setItem(row, 2, item2)
+
+            item3 = self.line_table.item(row, 3)
+            if item3 is None:
+                item3 = self._create_line_table_item(self._format_optional(entry.ktn_per_pal), editable=True)
+                self.line_table.setItem(row, 3, item3)
+
+            item0.setText(entry.customer.name)
+            item1.setText(entry.item.name)
+            item2.setText(self._format_pallets(entry.pallets))
+            item3.setText(self._format_optional(entry.ktn_per_pal))
         finally:
             self._line_table_updates_blocked = False
 
