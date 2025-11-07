@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, Qt, QThread, Signal
-from PySide6.QtGui import QDoubleValidator
+from PySide6.QtGui import QCloseEvent, QDoubleValidator
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -1441,7 +1441,6 @@ class OrderDialog(QDialog):
 
     def _on_route_finished(self, result: Optional[RouteResult], error: Optional[BaseException]) -> None:
         """Handle background routing completion, updating the list or surfacing errors."""
-        self.route_worker = None
         self.estimate_button.setEnabled(True)
         if error or result is None:
             message = str(error) if error else "Unable to compute route."
@@ -1483,9 +1482,24 @@ class OrderDialog(QDialog):
 
     def _on_route_thread_finished(self) -> None:
         """Reset thread references once the worker completes or aborts."""
+        self.route_worker = None
         self.route_thread = None
         if self.route_status_label.text() == "Calculating route...":
             self.route_status_label.clear()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Ensure background processing stops cleanly before the dialog is destroyed."""
+        self._shutdown_route_thread()
+        super().closeEvent(event)
+
+    def _shutdown_route_thread(self) -> None:
+        """Stop the route calculation thread (if running) and release references."""
+        thread = self.route_thread
+        if thread and thread.isRunning():
+            thread.quit()
+            thread.wait()
+        self.route_thread = None
+        self.route_worker = None
 
     def export_route(self):
         """Convert the current previewed route into an Excel workbook."""
