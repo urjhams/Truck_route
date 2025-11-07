@@ -78,8 +78,9 @@ class RouteExcelRow:
 
 
 def _load_workbook_from_template(path: Path) -> Tuple[Workbook, Worksheet]:
+    # NOTE: openpyxl preserves existing images if we do not recreate the sheet
     if path.exists():
-        workbook = load_workbook(path)
+        workbook = load_workbook(path, data_only=False, keep_vba=False, keep_links=False)
     else:
         workbook = Workbook()
     worksheet = workbook.active
@@ -114,51 +115,92 @@ def _apply_grid_border(
     max_row: int,
     min_col: int,
     max_col: int,
+    *,
+    last_customer_row: Optional[int] = None,
 ) -> None:
     """
     Draw a cleaner table border:
-    - Outer border around the whole table region
+    - Outer border around the customer data region (not including summary rows)
     - Vertical borders only at: end of items section, and end of address column
-    - Horizontal border only under final item of each customer block (caller passes correct max_row)
+    - Horizontal border only under final item of each customer block (via separate helper)
     """
+    # If last_customer_row is specified and less than max_row, stop outer border at that row.
+    border_end_row = last_customer_row if last_customer_row is not None and last_customer_row < max_row else max_row
 
-    # Outer rectangle around the table
+    # Outer rectangle around the customer data (not summary)
     for col in range(min_col, max_col + 1):
         top = worksheet.cell(row=min_row, column=col)
-        bottom = worksheet.cell(row=max_row, column=col)
+        bottom = worksheet.cell(row=border_end_row, column=col)
         top.border = Border(top=_THIN_SIDE, left=top.border.left, right=top.border.right, bottom=top.border.bottom)
         bottom.border = Border(bottom=_THIN_SIDE, left=bottom.border.left, right=bottom.border.right, top=bottom.border.top)
 
-    for row in range(min_row, max_row + 1):
+    for row in range(min_row, border_end_row + 1):
         left = worksheet.cell(row=row, column=min_col)
         right = worksheet.cell(row=row, column=max_col)
         left.border = Border(left=_THIN_SIDE, top=left.border.top, right=left.border.right, bottom=left.border.bottom)
         right.border = Border(right=_THIN_SIDE, top=right.border.top, left=right.border.left, bottom=right.border.bottom)
 
     # Vertical border after items column group (ktn col)
-    divider_col = _COLUMN_ITEM_START + 5
-    for row in range(min_row, max_row + 1):
-        cell = worksheet.cell(row=row, column=divider_col)
-        cell.border = Border(
-            right=_THIN_SIDE,
-            left=cell.border.left,
-            top=cell.border.top,
-            bottom=cell.border.bottom,
-        )
+    if last_customer_row is not None:
+        divider_col = _COLUMN_ITEM_START + 5
+        last_row_for_divider = last_customer_row
+        for row in range(min_row, last_row_for_divider + 1):
+            cell = worksheet.cell(row=row, column=divider_col)
+            cell.border = Border(
+                right=_THIN_SIDE,
+                left=cell.border.left,
+                top=cell.border.top,
+                bottom=cell.border.bottom,
+            )
+    # Do NOT draw vertical border in summary region (after last_customer_row)
 
-    # Vertical border after address column
-    for row in range(min_row, max_row + 1):
-        cell = worksheet.cell(row=row, column=_COLUMN_SECONDARY)
-        cell.border = Border(
-            right=_THIN_SIDE,
-            left=cell.border.left,
-            top=cell.border.top,
-            bottom=cell.border.bottom,
-        )
+    # Horizontal separator under full customer block (final row) handled separately
 
-    # Horizontal separator under full customer block (final row)
-    for col in range(min_col, max_col + 1):
-        cell = worksheet.cell(row=max_row, column=col)
+    # If there are summary rows after the last customer row, draw left/right border for those rows
+    if border_end_row < max_row:
+        for row in range(border_end_row + 1, max_row + 1):
+            left = worksheet.cell(row=row, column=min_col)
+            right = worksheet.cell(row=row, column=max_col)
+            left.border = Border(left=_THIN_SIDE, top=left.border.top, right=left.border.right, bottom=left.border.bottom)
+            right.border = Border(right=_THIN_SIDE, top=right.border.top, left=right.border.left, bottom=right.border.bottom)
+def _apply_summary_border(worksheet: Worksheet, start_row: int, end_row: int) -> None:
+    """
+    Draw a thin border around the summary rows (date and total), only for columns B and C.
+    - Left border at column B, right border at column C, for all rows.
+    - Top border at top row, bottom border at bottom row.
+    - No vertical borders elsewhere, no border at other columns.
+    """
+    min_col = _COLUMN_ITEM_START
+    max_col = _COLUMN_ITEM_START + 1
+    for row in range(start_row, end_row + 1):
+        left = worksheet.cell(row=row, column=min_col)
+        right = worksheet.cell(row=row, column=max_col)
+        # Determine top/bottom sides depending on whether this is the first/last row.
+        left_top = _THIN_SIDE if row == start_row else left.border.top
+        left_bottom = _THIN_SIDE if row == end_row else left.border.bottom
+        right_top = _THIN_SIDE if row == start_row else right.border.top
+        right_bottom = _THIN_SIDE if row == end_row else right.border.bottom
+        # Always left/right border
+        left_border = Border(
+            left=_THIN_SIDE,
+            top=left_top,
+            right=left.border.right,
+            bottom=left_bottom,
+        )
+        right_border = Border(
+            right=_THIN_SIDE,
+            top=right_top,
+            left=right.border.left,
+            bottom=right_bottom,
+        )
+        left.border = left_border
+        right.border = right_border
+
+def _apply_customer_separator(worksheet: Worksheet, row_idx: int) -> None:
+    """Draw a horizontal line (bottom border) at row_idx across all columns of the main table."""
+    # Draw a horizontal line (bottom border) at row_idx across all columns of the main table.
+    for col in range(_COLUMN_ITEM_START, _COLUMN_SECONDARY + 1):
+        cell = worksheet.cell(row=row_idx, column=col)
         cell.border = Border(
             bottom=_THIN_SIDE,
             top=cell.border.top,
@@ -204,13 +246,17 @@ def _write_item_line(worksheet: Worksheet, row_idx: int, item: RouteExcelItem) -
     )
 
 
-def _write_customer_block(worksheet: Worksheet, start_row: int, row: RouteExcelRow) -> int:
+def _write_customer_block(worksheet: Worksheet, start_row: int, row: RouteExcelRow) -> tuple[int, int]:
+    """
+    Write a customer block starting at start_row.
+    Returns (next_row, separator_row) where separator_row is the row index where a horizontal line should be applied.
+    """
     worksheet.cell(row=start_row, column=_COLUMN_SECONDARY, value=row.customer_name)
     current_row = start_row + 1
     address_lines = _split_address_lines(row.address)
     line_count = max(len(row.items), len(address_lines))
     if line_count == 0:
-        line_count = 1  # keep spacing even when no items/address
+        return start_row, None
 
     for offset in range(line_count):
         if offset < len(row.items):
@@ -219,8 +265,11 @@ def _write_customer_block(worksheet: Worksheet, start_row: int, row: RouteExcelR
             worksheet.cell(row=current_row, column=_COLUMN_SECONDARY, value=address_lines[offset])
         current_row += 1
 
-    worksheet.cell(row=current_row, column=_COLUMN_SECONDARY, value=None)  # blank spacer row
-    return current_row + 1
+    # Only add a blank padding row if there were items or address lines
+    worksheet.cell(row=current_row, column=_COLUMN_SECONDARY, value=None)
+    padding_row = current_row
+    separator_row = padding_row + 1  # separator goes one row below padding
+    return separator_row + 1, separator_row
 
 
 def export_route_to_excel(
@@ -241,9 +290,20 @@ def export_route_to_excel(
     current_row = _DATA_START_ROW
     table_start_row = current_row
     table_end_row = current_row - 1
+    separator_rows = []
     for row in reversed(rows):
-        current_row = _write_customer_block(worksheet, current_row, row)
-        table_end_row = max(table_end_row, current_row - 2)  # last row containing data
+        next_row, separator_row = _write_customer_block(worksheet, current_row, row)
+        if separator_row is not None:
+            separator_rows.append(separator_row)
+            table_end_row = max(table_end_row, next_row - 2)  # last row containing data
+            current_row = next_row
+        # If separator_row is None, do not add phantom block or separator, do not advance current_row
+
+    # Draw horizontal separator after each customer block
+    for sep_row in separator_rows:
+        _apply_customer_separator(worksheet, sep_row)
+
+    last_customer_row = max(separator_rows) if separator_rows else table_end_row
 
     current_row += 1  # extra blank row before summary
 
@@ -256,6 +316,9 @@ def export_route_to_excel(
         else:
             date_value = order_date
         worksheet.cell(row=current_row, column=_COLUMN_ITEM_START, value=date_value)
+        # Merge columns B and C for the date row
+        worksheet.merge_cells(start_row=summary_start_row, start_column=_COLUMN_ITEM_START,
+                              end_row=summary_start_row, end_column=_COLUMN_ITEM_START + 1)
         current_row += 1
 
     total = _normalized_number(total_pallets) if total_pallets is not None else None
@@ -274,14 +337,13 @@ def export_route_to_excel(
             table_end_row,
             _COLUMN_ITEM_START,
             _COLUMN_SECONDARY,
+            last_customer_row=last_customer_row,
         )
     if summary_end_row >= summary_start_row:
-        _apply_grid_border(
+        _apply_summary_border(
             worksheet,
             summary_start_row,
             summary_end_row,
-            _COLUMN_ITEM_START,
-            _COLUMN_ITEM_START + 1,
         )
 
     workbook.save(output_path)
