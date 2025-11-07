@@ -16,11 +16,13 @@ from pathlib import Path
 from typing import Optional, Sequence, Tuple
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Border, Side
+from openpyxl.drawing.image import Image
+from openpyxl.styles import Border, Side, Alignment
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 DEFAULT_TEMPLATE = Path(__file__).resolve().parent.parent / "assets" / "template.xlsx"
+DEFAULT_HEADER_IMAGE = Path(__file__).resolve().parent.parent / "assets" / "header_logo.png"
 
 _COLUMN_ITEM_START = 2  # Column B
 _COLUMN_SECONDARY = 8  # Column H
@@ -32,7 +34,7 @@ _COLUMN_WIDTHS = {
     5: 28,  # item name
     6: 6,   # ktn qty
     7: 6,   # "ktn"
-    8: 32,  # customer / address block
+    8: 40,  # customer / address block (increased from 32)
 }
 _DATA_START_ROW = _TOP_PADDING_ROWS + 1
 _CLEAR_ROW_COUNT = 400  # generous default to wipe prior runs without touching images
@@ -78,11 +80,8 @@ class RouteExcelRow:
 
 
 def _load_workbook_from_template(path: Path) -> Tuple[Workbook, Worksheet]:
-    # NOTE: openpyxl preserves existing images if we do not recreate the sheet
-    if path.exists():
-        workbook = load_workbook(path, data_only=False, keep_vba=False, keep_links=False)
-    else:
-        workbook = Workbook()
+    # Create a fresh workbook instead of loading template to avoid duplicate images
+    workbook = Workbook()
     worksheet = workbook.active
     if worksheet is None:
         worksheet = workbook.create_sheet("Route")
@@ -92,6 +91,54 @@ def _load_workbook_from_template(path: Path) -> Tuple[Workbook, Worksheet]:
         worksheet.column_dimensions[get_column_letter(idx)].width = width
     _clear_data_region(worksheet)
     return workbook, worksheet
+
+
+def _add_header_image(worksheet: Worksheet, image_path: Path) -> None:
+    """
+    Add an image to the header area, starting at column E.
+    The image will be positioned above the customer data table.
+    """
+    if not image_path.exists():
+        return
+    
+    try:
+        # Set row heights for the header area (rows 1-3) to be 3 times taller
+        normal_row_height = 15  # Default row height in Excel
+        header_row_height = normal_row_height * 3
+
+        worksheet.row_dimensions[3].height = header_row_height # row 3
+        
+        # Create image object
+        img = Image(str(image_path))
+
+        # Position the image starting at column E, row 2
+        img.anchor = 'E2'  # Start at column E, row 2
+
+        # Scale the image to fit in the enlarged header area
+        # Column E width from _COLUMN_WIDTHS (item name column width)
+        column_e_width_chars = _COLUMN_WIDTHS.get(5, 40)  # Column 5 (E) has width 40 characters
+        # Convert Excel character width to approximate pixels (Excel uses ~7 pixels per character)
+        max_width = int(column_e_width_chars * 7)
+        max_height = int(header_row_height * 3)  # Available height across 3 tall rows
+        
+        # Get original dimensions
+        original_width = img.width
+        original_height = img.height
+        
+        # Calculate scale factor to maintain aspect ratio
+        width_scale = max_width / original_width
+        height_scale = max_height / original_height
+        scale_factor = min(width_scale, height_scale)  # Use the smaller scale to fit within bounds
+        
+        # Apply proportional scaling with proper rounding
+        img.width = round(original_width * scale_factor)
+        img.height = round(original_height * scale_factor)
+        
+        # Add the image to the worksheet
+        worksheet.add_image(img)
+        
+    except Exception as e:
+        print(f"Warning: Could not add header image: {e}")
 
 
 def _clear_data_region(worksheet: Worksheet) -> None:
@@ -252,7 +299,13 @@ def _write_customer_block(worksheet: Worksheet, start_row: int, row: RouteExcelR
     Returns (next_row, separator_row) where separator_row is the row index where a horizontal line should be applied,
     or None if no items or address lines were written for this customer.
     """
-    worksheet.cell(row=start_row, column=_COLUMN_SECONDARY, value=row.customer_name)
+    # Create horizontal center alignment for column H
+    center_alignment = Alignment(horizontal='center')
+    
+    # Write customer name with center alignment
+    customer_cell = worksheet.cell(row=start_row, column=_COLUMN_SECONDARY, value=row.customer_name)
+    customer_cell.alignment = center_alignment
+    
     current_row = start_row + 1
     address_lines = _split_address_lines(row.address)
     line_count = max(len(row.items), len(address_lines))
@@ -263,7 +316,9 @@ def _write_customer_block(worksheet: Worksheet, start_row: int, row: RouteExcelR
         if offset < len(row.items):
             _write_item_line(worksheet, current_row, row.items[offset])
         if offset < len(address_lines):
-            worksheet.cell(row=current_row, column=_COLUMN_SECONDARY, value=address_lines[offset])
+            # Write address line with center alignment
+            address_cell = worksheet.cell(row=current_row, column=_COLUMN_SECONDARY, value=address_lines[offset])
+            address_cell.alignment = center_alignment
         current_row += 1
 
     # Only add a blank padding row if there were items or address lines
@@ -280,6 +335,7 @@ def export_route_to_excel(
     order_date: Optional[datetime | date | str] = None,
     total_pallets: Optional[float] = None,
     template_path: Optional[Path] = None,
+    header_image_path: Optional[Path] = None,
 ) -> Path:
     """
     Export the provided rows to an Excel file matching the sample layout.
@@ -347,8 +403,13 @@ def export_route_to_excel(
             summary_end_row,
         )
 
+    # Add header image if provided or use default
+    image_to_use = header_image_path or DEFAULT_HEADER_IMAGE
+    if image_to_use and image_to_use.exists():
+        _add_header_image(worksheet, image_to_use)
+    
     workbook.save(output_path)
     return output_path
 
 
-__all__ = ["RouteExcelItem", "RouteExcelRow", "export_route_to_excel", "DEFAULT_TEMPLATE"]
+__all__ = ["RouteExcelItem", "RouteExcelRow", "export_route_to_excel", "DEFAULT_TEMPLATE", "DEFAULT_HEADER_IMAGE"]
