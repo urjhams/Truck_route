@@ -6,12 +6,14 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime
+import shutil
+from pathlib import Path
 from typing import Generator, List, Optional, Sequence
 
 from sqlalchemy import func, cast, String
 from sqlmodel import Session, select, desc
 
-from TruckRouteApp.db import DEFAULT_DB_PATH, session_context
+from TruckRouteApp.db import DEFAULT_DB_PATH, session_context, init_db
 from TruckRouteApp.models.schema import Customer, Item, Order, OrderLine, Warehouse
 
 
@@ -21,7 +23,7 @@ class DatabaseService:
     """
 
     def __init__(self, db_path=None):
-        self._db_path = db_path or DEFAULT_DB_PATH
+        self._db_path = Path(db_path or DEFAULT_DB_PATH)
 
     @contextmanager
     def session(self) -> Generator[Session, None, None]:
@@ -198,6 +200,32 @@ class DatabaseService:
                 if suffix.isdigit():
                     max_suffix = max(max_suffix, int(suffix))
         return f"{prefix}{max_suffix + 1}"
+
+    # --- Database backup/restore ---------------------------------------
+    def export_database(self, destination: Path | str) -> Path:
+        """
+        Copy the SQLite database file to the requested destination path.
+        Returns the resolved destination path.
+        """
+        dest_path = Path(destination).expanduser().resolve()
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(self._db_path, dest_path)
+        return dest_path
+
+    def import_database(self, source: Path | str) -> Path:
+        """
+        Replace the current SQLite database file with the provided source file.
+        Runs lightweight migrations after copying to keep schemas aligned.
+        Returns the resolved destination path.
+        """
+        source_path = Path(source).expanduser().resolve()
+        if not source_path.exists():
+            raise FileNotFoundError(f"Database import file not found: {source_path}")
+        destination = self._db_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, destination)
+        init_db(destination)  # ensure schema/migrations applied
+        return destination
 
 
 __all__ = ["DatabaseService"]
