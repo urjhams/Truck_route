@@ -269,7 +269,7 @@ def _write_customer_block(worksheet: Worksheet, start_row: int, row: RouteExcelR
     # Only add a blank padding row if there were items or address lines
     worksheet.cell(row=current_row, column=_COLUMN_SECONDARY, value=None)
     padding_row = current_row
-    separator_row = padding_row + 1  # separator goes one row below padding
+    separator_row = padding_row  # separator goes at the padding row (bottom of customer block)
     return separator_row + 1, separator_row
 
 
@@ -296,7 +296,7 @@ def export_route_to_excel(
         next_row, separator_row = _write_customer_block(worksheet, current_row, row)
         if separator_row is not None:
             separator_rows.append(separator_row)
-            table_end_row = max(table_end_row, next_row - 2)  # last row containing data
+            table_end_row = max(table_end_row, separator_row)  # last row containing data (padding row)
             current_row = next_row
         # If separator_row is None, do not add phantom block or separator, do not advance current_row
 
