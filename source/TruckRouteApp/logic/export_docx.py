@@ -118,6 +118,10 @@ def export_pallets_to_docx(
     if base_sect_pr is None:
         raise ValueError("Template is missing section properties.")
     
+    # Remove all empty paragraphs from the first ticket initially
+    # We'll add them back strategically for consistent spacing
+    _remove_all_empty_paragraphs(target_body)
+    
     # Iterate through each subsequent ticket document and append its content to the final document
     for sub_doc in ticket_documents[1:]:
         source_body = sub_doc.element.body
@@ -126,19 +130,28 @@ def export_pallets_to_docx(
         # We'll use our base section properties for consistent page layout
         _detach_body_sectpr(source_body)
         
-        # Find the last paragraph in the target document before adding new content
-        # This is where we'll insert a section break to start a new page
+        # Find the last NON-EMPTY paragraph in the target document before adding new content
+        # This is the pallet index line where we'll insert a section break
         last_paragraph = _get_last_paragraph(target_body)
         if last_paragraph is not None:
-            # Add a section break with "nextPage" type to the last paragraph
-            # This ensures the next ticket content starts on a fresh page
-            _add_section_break_to_paragraph(last_paragraph, base_sect_pr)
+            # Add an empty paragraph BEFORE adding the section break
+            # This provides spacing between pallet index and the section break
+            _add_empty_paragraph(target_body)
+            
+            # Now add the section break to what is now the last paragraph (the empty one)
+            # This way the empty spacing is before the break, maintaining consistent layout
+            new_last = _get_last_actual_paragraph(target_body)
+            if new_last is not None:
+                _add_section_break_to_paragraph(new_last, base_sect_pr)
         
-        # Copy all content elements (paragraphs, tables, etc.) from the source document
-        # and append them to the target document body
-        _append_page_children(target_body, source_body)
+        # Copy all content elements from source, but skip empty paragraphs
+        # We manage empty paragraphs manually for consistency
+        _append_page_children(target_body, source_body, keep_one_empty=False)
     
-    # After all tickets are merged, append the final section properties
+    # Add one empty paragraph at the end for the last page
+    _add_empty_paragraph(target_body)
+    
+    # Append the final section properties
     # This ensures the last page maintains the correct layout settings
     target_body.append(deepcopy(base_sect_pr))
     
@@ -211,7 +224,60 @@ def _format_address_lines(
     return (address1 + ",", address2)
 
 
-def _append_page_children(target_body, source_body) -> None:
+def _remove_all_empty_paragraphs(body: Any) -> None:
+    """
+    Remove ALL empty paragraphs from a document body.
+    
+    Used to clean up the template's empty paragraphs so we can add them
+    back strategically for consistent spacing across all pages.
+    """
+    children_to_remove = []
+    for child in list(body):
+        if child.tag.endswith("p"):
+            text_nodes = child.xpath('.//w:t')
+            texts = [n.text for n in text_nodes if n.text]
+            combined_text = ''.join(texts).strip()
+            
+            if not combined_text:
+                children_to_remove.append(child)
+    
+    for child in children_to_remove:
+        body.remove(child)
+
+
+def _get_last_actual_paragraph(body: Any) -> Any | None:
+    """
+    Get the absolute last paragraph element (including empty ones).
+    
+    This is different from _get_last_paragraph which skips empty paragraphs.
+    Used to find where to add section breaks after adding spacing paragraphs.
+    """
+    children = list(body)
+    for child in reversed(children):
+        if child.tag.endswith("p"):
+            return child
+    return None
+
+
+def _add_empty_paragraph(body: Any) -> None:
+    """
+    Add an empty paragraph at the end of the document body.
+    
+    This is used for the last page to maintain consistent vertical alignment
+    with other pages that have section breaks in their last paragraph.
+    The empty paragraph provides the same spacing that appears after the
+    pallet index line on non-final pages.
+    """
+    from docx.oxml import OxmlElement
+    
+    # Create a new paragraph element
+    p = OxmlElement("w:p")
+    
+    # Add it to the body
+    body.append(p)
+
+
+def _append_page_children(target_body, source_body, keep_one_empty: bool = False) -> None:
     """
     Copy non-section children from ``source_body`` into ``target_body``.
     
@@ -219,13 +285,37 @@ def _append_page_children(target_body, source_body) -> None:
     (such as paragraphs, tables, images, etc.) and appends them to the target document.
     Section properties (sectPr) are skipped because we manage page layout separately
     using the base section properties.
+    
+    Args:
+        target_body: The destination document body
+        source_body: The source document body to copy from
+        keep_one_empty: If True, keeps ONE empty paragraph for spacing
     """
+    empty_paragraphs_found = []
+    
     for child in list(source_body):
         # Skip section property elements - we handle page layout with base_sect_pr
         if child.tag.endswith("sectPr"):
             continue
+        
+        # Handle empty paragraphs
+        if child.tag.endswith("p"):
+            # Check if paragraph has any text content
+            text_nodes = child.xpath('.//w:t')
+            texts = [n.text for n in text_nodes if n.text]
+            combined_text = ''.join(texts).strip()
+            
+            # Track empty paragraphs
+            if not combined_text:
+                empty_paragraphs_found.append(child)
+                continue
+        
         # Deep copy the element to avoid reference issues, then append to target
         target_body.append(deepcopy(child))
+    
+    # If requested, keep ONE empty paragraph for consistent spacing
+    if keep_one_empty and empty_paragraphs_found:
+        target_body.append(deepcopy(empty_paragraphs_found[0]))
 
 
 def _replace_placeholders(document: Any, replacements: Mapping[str, str]) -> None:
