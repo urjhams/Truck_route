@@ -78,35 +78,64 @@ def export_pallets_to_docx(
         )
         ticket_documents.append(document)
 
+    # If only one ticket, simply save and exit early
     if len(ticket_documents) == 1:
         ticket_documents[0].save(str(destination_path))
         return
     
+    # For multiple tickets, we need to merge all documents into one
+    # Start with the first ticket document as our base/final document
     final_doc = ticket_documents[0]
     target_body = final_doc.element.body
+    
+    # Extract and store the section properties (page setup, margins, etc.) from the first document
+    # This defines the page layout that will be used for all pages in the final document
     base_sect_pr = _detach_body_sectpr(target_body)
     if base_sect_pr is None:
         raise ValueError("Template is missing section properties.")
     
+    # Iterate through each subsequent ticket document and append its content to the final document
     for sub_doc in ticket_documents[1:]:
         source_body = sub_doc.element.body
+        
+        # Remove section properties from the source document to avoid conflicts
+        # We'll use our base section properties for consistent page layout
         _detach_body_sectpr(source_body)
         
+        # Find the last paragraph in the target document before adding new content
+        # This is where we'll insert a section break to start a new page
         last_paragraph = _get_last_paragraph(target_body)
         if last_paragraph is not None:
+            # Add a section break with "nextPage" type to the last paragraph
+            # This ensures the next ticket content starts on a fresh page
             _add_section_break_to_paragraph(last_paragraph, base_sect_pr)
         
+        # Copy all content elements (paragraphs, tables, etc.) from the source document
+        # and append them to the target document body
         _append_page_children(target_body, source_body)
     
+    # After all tickets are merged, append the final section properties
+    # This ensures the last page maintains the correct layout settings
     target_body.append(deepcopy(base_sect_pr))
+    
+    # Save the complete merged document to the destination path
     final_doc.save(str(destination_path))
 
 
 def _append_page_children(target_body, source_body) -> None:
-    """Copy non-section children from ``source_body`` into ``target_body``."""
+    """
+    Copy non-section children from ``source_body`` into ``target_body``.
+    
+    This function iterates through all XML elements in the source document body
+    (such as paragraphs, tables, images, etc.) and appends them to the target document.
+    Section properties (sectPr) are skipped because we manage page layout separately
+    using the base section properties.
+    """
     for child in list(source_body):
+        # Skip section property elements - we handle page layout with base_sect_pr
         if child.tag.endswith("sectPr"):
             continue
+        # Deep copy the element to avoid reference issues, then append to target
         target_body.append(deepcopy(child))
 
 
@@ -201,31 +230,73 @@ def _apply_replacement(
 
 
 def _detach_body_sectpr(body) -> Any | None:
+    """
+    Extract and remove section properties from a document body element.
+    
+    Section properties (sectPr) define page layout settings like margins, size,
+    orientation, headers/footers, etc. We need to detach them to prevent conflicts
+    when merging multiple documents, then reapply them strategically.
+    
+    Returns the detached sectPr element, or None if not found.
+    """
+    # Use XPath to find section properties in the document body
     sect_pr = body.xpath("./w:sectPr")
     if sect_pr:
         element = sect_pr[0]
+        # Remove the element from the body but keep a reference to return it
         body.remove(element)
         return element
     return None
 
 
 def _get_last_paragraph(body: Any) -> Any | None:
+    """
+    Find the last paragraph element in a document body.
+    
+    We need to locate the last paragraph so we can insert a section break into it,
+    which will force the next content to start on a new page. Word stores section
+    breaks as properties within paragraph elements, not as standalone elements.
+    
+    Returns the last paragraph element, or None if no paragraphs exist.
+    """
     children = list(body)
+    # Iterate backwards through children to find the last paragraph element
     for child in reversed(children):
+        # Paragraph elements have tags ending with "p" (e.g., "{namespace}p")
         if child.tag.endswith("p"):
             return child
     return None
 
 
 def _add_section_break_to_paragraph(paragraph: Any, base_sect_pr: Any) -> None:
-    """Add a section break with nextPage type to ensure next content starts on a new page."""
+    """
+    Add a section break with nextPage type to ensure next content starts on a new page.
+    
+    In Word's XML structure, section breaks are embedded within paragraph elements.
+    By adding section properties with type="nextPage" to the last paragraph of a section,
+    we force Word to start the next section (next ticket) on a new page.
+    
+    Args:
+        paragraph: The paragraph element where the section break will be inserted
+        base_sect_pr: The base section properties (page layout) to copy and modify
+    """
+    # Create a deep copy of the base section properties to avoid modifying the original
     sect_pr = deepcopy(base_sect_pr)
-    # Set the section type to nextPage to start the next section on a new page
+    
+    # Look for an existing section type element in the section properties
     type_elem = sect_pr.find(qn("w:type"))
+    
+    # If no type element exists, create one and insert it at the beginning
     if type_elem is None:
         type_elem = OxmlElement("w:type")
         sect_pr.insert(0, type_elem)
+    
+    # Set the type attribute to "nextPage" which forces a page break
+    # Other options would be "continuous" (no break) or "oddPage"/"evenPage"
     type_elem.set(qn("w:val"), "nextPage")
+    
+    # Append the modified section properties to the paragraph
+    # This creates the page break effect before the next content
     paragraph.append(sect_pr)
 
 
