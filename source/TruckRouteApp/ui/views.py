@@ -15,6 +15,7 @@ from TruckRouteApp.ui.base import BaseCrudView
 from TruckRouteApp.ui.dialogs import CSVMappingDialog, CustomerDialog, ItemDialog, WarehouseDialog
 from TruckRouteApp.ui.order_dialog import OrderDialog
 from TruckRouteApp.ui.table_models import ColumnConfig, SQLModelTableModel
+from TruckRouteApp.ui.i18n import i18n, tr
 
 
 def _open_sniffed_reader(fh) -> csv.DictReader:
@@ -87,8 +88,8 @@ class WarehouseView(BaseCrudView):
             return
         confirm = QMessageBox.question(
             self,
-            "Delete warehouse",
-            f"Delete warehouse '{warehouse.name}'?",
+            tr("Delete warehouse"),
+            tr("Delete warehouse '{name}'?").format(name=warehouse.name),
         )
         if confirm == QMessageBox.StandardButton.Yes:
             self.db.delete_warehouse(warehouse.id)
@@ -121,9 +122,11 @@ class CustomerView(BaseCrudView):
         self.edit_button.clicked.connect(self.edit)
         self.delete_button.clicked.connect(self.delete)
         self.refresh_button.clicked.connect(self.refresh)
-        self.import_button = QPushButton("Import CSV", self)
+        self.import_button = QPushButton(self)
         self.button_bar.insertWidget(3, self.import_button)
         self.import_button.clicked.connect(self.import_csv)
+        i18n.language_changed.connect(self._apply_translations)
+        self._apply_translations()
 
     def refresh(self):
         """Refresh the customer list from persistent storage."""
@@ -159,8 +162,8 @@ class CustomerView(BaseCrudView):
             return
         confirm = QMessageBox.question(
             self,
-            "Delete customer",
-            f"Delete customer '{customer.name}'?",
+            tr("Delete customer"),
+            tr("Delete customer '{name}'?").format(name=customer.name),
         )
         if confirm == QMessageBox.StandardButton.Yes:
             self.db.delete_customer(customer.id)
@@ -170,9 +173,9 @@ class CustomerView(BaseCrudView):
         """Import customers from a CSV file, skipping duplicates and quiet errors."""
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Import customers from CSV",
+            tr("Import customers from CSV"),
             "",
-            "CSV files (*.csv);;All files (*)",
+            tr("CSV files (*.csv);;All files (*)"),
         )
         if not path:
             return
@@ -181,7 +184,7 @@ class CustomerView(BaseCrudView):
                 reader = _open_sniffed_reader(fh)
                 headers = reader.fieldnames
                 if not headers:
-                    raise ValueError("CSV file must include a header row.")
+                    raise ValueError(tr("CSV file must include a header row."))
                 mapping_dialog = CSVMappingDialog(
                     headers,
                     [
@@ -207,10 +210,10 @@ class CustomerView(BaseCrudView):
                     try:
                         id_value = (row.get(id_col) or "").strip()
                         if not id_value:
-                            raise ValueError("missing id")
+                            raise ValueError(tr("missing id"))
                         name = (row.get(name_col) or "").strip()
                         if not name:
-                            raise ValueError("missing name")
+                            raise ValueError(tr("missing name"))
                         lat = None
                         lng = None
                         if lat_col:
@@ -231,7 +234,10 @@ class CustomerView(BaseCrudView):
                         continue
                 self.refresh()
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Import error", str(exc))
+            QMessageBox.critical(self, tr("Import error"), str(exc))
+
+    def _apply_translations(self) -> None:
+        self.import_button.setText(tr("Import CSV"))
 
 
 class ItemView(BaseCrudView):
@@ -260,9 +266,11 @@ class ItemView(BaseCrudView):
         self.edit_button.clicked.connect(self.edit)
         self.delete_button.clicked.connect(self.delete)
         self.refresh_button.clicked.connect(self.refresh)
-        self.import_button = QPushButton("Import CSV", self)
+        self.import_button = QPushButton(self)
         self.button_bar.insertWidget(3, self.import_button)
         self.import_button.clicked.connect(self.import_csv)
+        i18n.language_changed.connect(self._apply_translations)
+        self._apply_translations()
 
     def refresh(self):
         """Refresh the items table with the latest records."""
@@ -298,8 +306,8 @@ class ItemView(BaseCrudView):
             return
         confirm = QMessageBox.question(
             self,
-            "Delete item",
-            f"Delete item '{item.name}'?",
+            tr("Delete item"),
+            tr("Delete item '{name}'?").format(name=item.name),
         )
         if confirm == QMessageBox.StandardButton.Yes:
             self.db.delete_item(item.id)
@@ -309,9 +317,9 @@ class ItemView(BaseCrudView):
         """Import item records from CSV, capturing row-level issues for the user."""
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Import items from CSV",
+            tr("Import items from CSV"),
             "",
-            "CSV files (*.csv);;All files (*)",
+            tr("CSV files (*.csv);;All files (*)"),
         )
         if not path:
             return
@@ -320,7 +328,7 @@ class ItemView(BaseCrudView):
                 reader = _open_sniffed_reader(fh)
                 headers = reader.fieldnames
                 if not headers:
-                    raise ValueError("CSV file must include a header row.")
+                    raise ValueError(tr("CSV file must include a header row."))
                 mapping_dialog = CSVMappingDialog(
                     headers,
                     [
@@ -353,11 +361,11 @@ class ItemView(BaseCrudView):
                     try:
                         id_value = (row.get(id_col) or "").strip()
                         if not id_value:
-                            raise ValueError("missing id")
+                            raise ValueError(tr("missing id"))
                         item_id = id_value
                         name = (row.get(name_col) or "").strip()
                         if not name:
-                            raise ValueError("missing name")
+                            raise ValueError(tr("missing name"))
                         ktn_per_pal = None
                         if ktn_col:
                             ktn_str = (row.get(ktn_col) or "").strip()
@@ -398,18 +406,21 @@ class ItemView(BaseCrudView):
                         skipped += 1
                         errors.append(f"Row {row_num}: {exc}")
                 self.refresh()
-                summary = f"Imported {imported} item(s)."
+                summary = tr("Imported {count} item(s).").format(count=imported)
                 if skipped:
-                    summary += f" Skipped {skipped} row(s)."
+                    summary += " " + tr("Skipped {count} row(s).").format(count=skipped)
                 if errors:
                     details = "\n".join(errors[:5])
                     if len(errors) > 5:
                         details += "\n..."
-                    QMessageBox.warning(self, "Import completed with issues", summary + "\n\n" + details)
+                    QMessageBox.warning(self, tr("Import completed with issues"), summary + "\n\n" + details)
                 else:
-                    QMessageBox.information(self, "Import complete", summary)
+                    QMessageBox.information(self, tr("Import complete"), summary)
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Import error", str(exc))
+            QMessageBox.critical(self, tr("Import error"), str(exc))
+
+    def _apply_translations(self) -> None:
+        self.import_button.setText(tr("Import CSV"))
 
 
 class OrderView(BaseCrudView):
@@ -427,21 +438,21 @@ class OrderView(BaseCrudView):
         self.set_model(self.model)
         self.refresh()
 
-        self.add_button.setText("Create order")
-        self.edit_button.setText("View/Edit order")
         self.edit_button.setVisible(True)
 
         self.add_button.clicked.connect(self.create_order)
         self.edit_button.clicked.connect(self.edit)
         self.delete_button.clicked.connect(self.delete_order)
         self.refresh_button.clicked.connect(self.refresh)
+        i18n.language_changed.connect(self._apply_translations)
+        self._apply_translations()
 
         self.table.horizontalHeader().setMinimumSectionSize(100)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
 
     def _warehouse_name(self, order: Order):
         warehouse = self.db.get_warehouse(order.warehouse_id)
-        return warehouse.name if warehouse else "Unknown"
+        return warehouse.name if warehouse else tr("Unknown")
 
     def refresh(self):
         """Reload the order listing, sorted by creation timestamp."""
@@ -466,8 +477,8 @@ class OrderView(BaseCrudView):
             return
         confirm = QMessageBox.question(
             self,
-            "Delete order",
-            f"Delete order #{order.id}?",
+            tr("Delete order"),
+            tr("Delete order #{order_id}?").format(order_id=order.id),
         )
         if confirm == QMessageBox.StandardButton.Yes:
             self.db.delete_order(order.id)
@@ -488,7 +499,10 @@ class OrderView(BaseCrudView):
         try:
             self.db.update_order_with_lines(updated_order, lines)
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Update error", str(exc))
+            QMessageBox.critical(self, tr("Update error"), str(exc))
             return
         self.refresh()
 
+    def _apply_translations(self) -> None:
+        self.add_button.setText(tr("Create order"))
+        self.edit_button.setText(tr("View/Edit order"))

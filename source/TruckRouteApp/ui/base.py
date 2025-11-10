@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from TruckRouteApp.ui.table_models import SQLModelTableModel
+from TruckRouteApp.ui.i18n import i18n, tr
 
 
 class BaseCrudView(QWidget):
@@ -40,12 +41,14 @@ class BaseCrudView(QWidget):
         self.button_bar = QHBoxLayout()
         self.main_layout.addLayout(self.button_bar)
 
-        self.add_button = QPushButton("Add", self)
-        self.edit_button = QPushButton("Edit", self)
-        self.delete_button = QPushButton("Delete", self)
-        self.refresh_button = QPushButton("Refresh", self)
+        self.add_button = QPushButton(self)
+        self.edit_button = QPushButton(self)
+        self.delete_button = QPushButton(self)
+        self.refresh_button = QPushButton(self)
         for widget in (self.add_button, self.edit_button, self.delete_button, self.refresh_button):
             self.button_bar.addWidget(widget)
+        i18n.language_changed.connect(self.apply_translations)
+        self.apply_translations()
 
     def selected_index(self) -> Optional[QModelIndex]:
         """Return the currently selected row index or None when nothing is selected."""
@@ -70,5 +73,15 @@ class BaseCrudView(QWidget):
             try:
                 getattr(self, "edit")()
             except Exception as exc:
-                QMessageBox.critical(self, "Error", f"Unable to open editor: {exc}")
+                QMessageBox.critical(
+                    self,
+                    tr("Error"),
+                    tr("Unable to open editor: {details}").format(details=exc),
+                )
 
+    def apply_translations(self) -> None:
+        """Refresh button captions when the UI language changes."""
+        self.add_button.setText(tr("Add"))
+        self.edit_button.setText(tr("Edit"))
+        self.delete_button.setText(tr("Delete"))
+        self.refresh_button.setText(tr("Refresh"))

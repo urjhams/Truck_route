@@ -45,6 +45,7 @@ from TruckRouteApp.logic.export_excel import (
 )
 from TruckRouteApp.logic.routing_local import RouteResult, Stop, optimise_route
 from TruckRouteApp.models.schema import Customer, Item, Order, OrderLine, Warehouse
+from TruckRouteApp.ui.i18n import i18n, tr
 
 
 _ACTIVE_ROUTE_THREADS: List[QThread] = []
@@ -105,27 +106,31 @@ class OrderLineDialog(QDialog):
 
     def __init__(self, customers: Sequence[Customer], items: Sequence[Item], parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Add Line")
+        self.setWindowTitle(tr("Add Line"))
         self.setMinimumWidth(560)
         self.customers = list(customers)
         self.items = list(items)
         self.selected_lines: List[OrderLineEntry] = []
         self._item_rows: List[dict[str, QWidget]] = []
+        self._header_labels: List[tuple[QLabel, str]] = []
 
         layout = QVBoxLayout(self)
 
         form = QFormLayout()
         layout.addLayout(form)
+        self.customer_label = QLabel(self)
         self.customer_combo = QComboBox(self)
         for customer in self.customers:
             self.customer_combo.addItem(customer.name, customer)
         self.customer_combo.setMinimumWidth(260)
-        form.addRow("Customer", self.customer_combo)
+        form.addRow(self.customer_label, self.customer_combo)
 
-        layout.addWidget(QLabel("Products"))
+        self.products_label = QLabel(self)
+        layout.addWidget(self.products_label)
         header_layout = QHBoxLayout()
         for title, stretch in (("Product", 3), ("Pallets", 1), ("Karton/Pal", 1)):
-            label = QLabel(title, self)
+            label = QLabel(self)
+            self._header_labels.append((label, title))
             label.setStyleSheet("font-weight: 600;")
             if title == "Karton/Pal":
                 label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -157,6 +162,8 @@ class OrderLineDialog(QDialog):
 
         self._add_item_row()
         self._update_remove_button_state()
+        i18n.language_changed.connect(self._apply_translations)
+        self._apply_translations()
 
     def _add_item_row(self) -> None:
         row_widget = QWidget(self)
@@ -170,14 +177,14 @@ class OrderLineDialog(QDialog):
         item_combo.setMinimumWidth(220)
 
         pallets_input = QLineEdit(row_widget)
-        pallets_input.setPlaceholderText("Number of pallets")
+        pallets_input.setPlaceholderText(tr("Number of pallets"))
         pallets_input.setMinimumWidth(120)
         validator = QDoubleValidator(0.0, 999999.0, 3, pallets_input)
         validator.setNotation(QDoubleValidator.Notation.StandardNotation)
         pallets_input.setValidator(validator)
 
         karton_input = QLineEdit(row_widget)
-        karton_input.setPlaceholderText("Karton per pallet")
+        karton_input.setPlaceholderText(tr("Karton per pallet"))
         karton_input.setMinimumWidth(120)
         karton_validator = QDoubleValidator(0.0, 999999.0, 3, karton_input)
         karton_validator.setNotation(QDoubleValidator.Notation.StandardNotation)
@@ -196,6 +203,7 @@ class OrderLineDialog(QDialog):
         }
         self._item_rows.append(row)
         self._update_remove_button_state()
+        self._apply_row_translations(row)
 
     def _remove_item_row(self) -> None:
         if len(self._item_rows) <= 1:
@@ -220,11 +228,13 @@ class OrderLineDialog(QDialog):
             pallets_text = cast(QLineEdit, row["pallets_input"]).text().strip()
             karton_text = cast(QLineEdit, row["karton_input"]).text().strip()
             if not pallets_text:
-                errors.append(f"Row {idx}: pallet count is required.")
+                errors.append(tr("Row {idx}: pallet count is required.").format(idx=idx))
                 continue
             pallets = float(pallets_text)
             if pallets <= 0:
-                errors.append(f"Row {idx}: pallet count must be greater than zero.")
+                errors.append(
+                    tr("Row {idx}: pallet count must be greater than zero.").format(idx=idx)
+                )
                 continue
             karton = float(karton_text) if karton_text else None
             lines.append(
@@ -236,14 +246,29 @@ class OrderLineDialog(QDialog):
                 )
             )
         if errors:
-            QMessageBox.warning(self, "Validation error", "\n".join(errors))
+            QMessageBox.warning(self, tr("Validation error"), "\n".join(errors))
             return
         if not lines:
-            QMessageBox.warning(self, "Validation error", "Add at least one product.")
+            QMessageBox.warning(self, tr("Validation error"), tr("Add at least one product."))
             return
 
         self.selected_lines = lines
         self.accept()
+
+    def _apply_row_translations(self, row: dict[str, QWidget]) -> None:
+        pallets_input: QLineEdit = cast(QLineEdit, row["pallets_input"])
+        karton_input: QLineEdit = cast(QLineEdit, row["karton_input"])
+        pallets_input.setPlaceholderText(tr("Number of pallets"))
+        karton_input.setPlaceholderText(tr("Karton per pallet"))
+
+    def _apply_translations(self) -> None:
+        self.setWindowTitle(tr("Add Line"))
+        self.customer_label.setText(tr("Customer"))
+        self.products_label.setText(tr("Products"))
+        for label, key in self._header_labels:
+            label.setText(tr(key))
+        for row in self._item_rows:
+            self._apply_row_translations(row)
 
 
 class OrderDialog(QDialog):
@@ -253,7 +278,7 @@ class OrderDialog(QDialog):
         super().__init__(parent)
         self.db = db
         self.order = order
-        self.setWindowTitle("Order")
+        self.setWindowTitle(tr("Order"))
         self.resize(900, 640)
 
         self.customers_all = self.db.list_customers()
@@ -267,12 +292,13 @@ class OrderDialog(QDialog):
         self.warehouse_combo = QComboBox(self)
         for warehouse in self.warehouses:
             self.warehouse_combo.addItem(warehouse.name, warehouse)
-        form.addRow("Warehouse", self.warehouse_combo)
+        self.warehouse_label = QLabel(self)
+        form.addRow(self.warehouse_label, self.warehouse_combo)
         main_layout.addLayout(form)
 
         line_controls = QHBoxLayout()
-        self.add_line_button = QPushButton("Add line", self)
-        self.remove_line_button = QPushButton("Remove line", self)
+        self.add_line_button = QPushButton(self)
+        self.remove_line_button = QPushButton(self)
         line_controls.addWidget(self.add_line_button)
         line_controls.addWidget(self.remove_line_button)
         line_controls.addStretch()
@@ -280,7 +306,6 @@ class OrderDialog(QDialog):
 
         self.line_table = QTableWidget(self)
         self.line_table.setColumnCount(5)
-        self.line_table.setHorizontalHeaderLabels(["Customer", "Item", "Pallets", "Karton/Pal", ""])
         self.line_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.line_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.line_table.verticalHeader().setVisible(False)
@@ -292,13 +317,14 @@ class OrderDialog(QDialog):
         self.route_list.model().rowsMoved.connect(self._on_route_reordered)  # type: ignore[arg-type]
 
         preview_layout = QVBoxLayout()
-        preview_layout.addWidget(QLabel("Route preview"))
+        self.route_preview_label = QLabel(self)
+        preview_layout.addWidget(self.route_preview_label)
         preview_layout.addWidget(self.route_list)
 
         actions_layout = QHBoxLayout()
-        self.estimate_button = QPushButton("Estimate route", self)
-        self.export_button = QPushButton("Export to Excel", self)
-        self.export_docx_button = QPushButton("Export to DOCX", self)
+        self.estimate_button = QPushButton(self)
+        self.export_button = QPushButton(self)
+        self.export_docx_button = QPushButton(self)
         self.route_status_label = QLabel("", self)
         actions_layout.addWidget(self.estimate_button)
         actions_layout.addWidget(self.export_button)
@@ -330,9 +356,14 @@ class OrderDialog(QDialog):
         self.route_thread: Optional[QThread] = None
         self.route_worker: Optional[RouteCalculationWorker] = None
         self._line_table_updates_blocked = False
+        self._route_calculating = False
+        self._route_status_state: Optional[str] = None
+        self._route_status_context: dict[str, float] = {}
         if self.order:
             self._populate_from_order()
         self._select_order_warehouse()
+        i18n.language_changed.connect(self._apply_translations)
+        self._apply_translations()
 
     @property
     def customers(self) -> List[Customer]:
@@ -371,8 +402,8 @@ class OrderDialog(QDialog):
         if missing_references:
             QMessageBox.warning(
                 self,
-                "Missing references",
-                "Some order lines reference customers or items that no longer exist and were skipped.",
+                tr("Missing references"),
+                tr("Some order lines reference customers or items that no longer exist and were skipped."),
             )
         self._invalidate_route_preview()
 
@@ -381,7 +412,7 @@ class OrderDialog(QDialog):
         self.route_order = []
         self.route_list.clear()
         self.export_button.setEnabled(False)
-        self.route_status_label.clear()
+        self._set_route_status(None)
 
     def _insert_line_row(self, entry: OrderLineEntry) -> None:
         row = self.line_table.rowCount()
@@ -402,7 +433,7 @@ class OrderDialog(QDialog):
             )
         finally:
             self._line_table_updates_blocked = False
-        remove_btn = QPushButton("Remove", self.line_table)
+        remove_btn = QPushButton(tr("Remove"), self.line_table)
         remove_btn.clicked.connect(lambda _, btn=remove_btn: self._remove_line_via_button(btn))
         self.line_table.setCellWidget(row, 4, remove_btn)
 
@@ -433,7 +464,11 @@ class OrderDialog(QDialog):
 
     def add_line(self):
         if not self.customers or not self.items:
-            QMessageBox.warning(self, "Missing data", "Define at least one customer and one item first.")
+            QMessageBox.warning(
+                self,
+                tr("Missing data"),
+                tr("Define at least one customer and one item first."),
+            )
             return
         dialog = OrderLineDialog(self.customers, self.items, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -460,8 +495,8 @@ class OrderDialog(QDialog):
         entry = self.lines[row]
         text = item.text().strip()
 
-        def reject(message: str) -> None:
-            QMessageBox.warning(self, "Invalid value", message)
+        def reject(message_key: str) -> None:
+            QMessageBox.warning(self, tr("Invalid value"), tr(message_key))
 
         if col == 2:
             try:
@@ -524,6 +559,40 @@ class OrderDialog(QDialog):
         finally:
             self._line_table_updates_blocked = False
 
+    def _set_line_table_headers(self) -> None:
+        headers = [tr("Customer"), tr("Item"), tr("Pallets"), tr("Karton/Pal"), ""]
+        self.line_table.setHorizontalHeaderLabels(headers)
+
+    def _set_route_status(self, state: Optional[str], **context) -> None:
+        self._route_status_state = state
+        self._route_status_context = context
+        if state == "calculating":
+            self.route_status_label.setText(tr("Calculating route..."))
+        elif state == "failed":
+            self.route_status_label.setText(tr("Route calculation failed."))
+        elif state == "ready":
+            km = context.get("km", 0.0)
+            self.route_status_label.setText(tr("Route ready — total distance ≈ {km:.2f} km").format(km=km))
+        else:
+            self.route_status_label.clear()
+
+    def _apply_translations(self) -> None:
+        self.setWindowTitle(tr("Order"))
+        self.warehouse_label.setText(tr("Warehouse"))
+        self.add_line_button.setText(tr("Add line"))
+        self.remove_line_button.setText(tr("Remove line"))
+        self.estimate_button.setText(tr("Estimate route"))
+        self.export_button.setText(tr("Export to Excel"))
+        self.export_docx_button.setText(tr("Export to DOCX"))
+        self.route_preview_label.setText(tr("Route preview"))
+        self._set_line_table_headers()
+        for row in range(self.line_table.rowCount()):
+            widget = self.line_table.cellWidget(row, 4)
+            if isinstance(widget, QPushButton):
+                widget.setText(tr("Remove"))
+        if self._route_status_state:
+            self._set_route_status(self._route_status_state, **self._route_status_context)
+
     def _on_route_reordered(self) -> None:
         new_order: List[int] = []
         for idx in range(self.route_list.count()):
@@ -547,7 +616,7 @@ class OrderDialog(QDialog):
 
     def _build_stops(self) -> Optional[List[Stop]]:
         if not self.lines:
-            QMessageBox.warning(self, "Missing lines", "Please add at least one order line.")
+            QMessageBox.warning(self, tr("Missing lines"), tr("Please add at least one order line."))
             return None
         warehouse: Warehouse = self.warehouse_combo.currentData()
         stops = [Stop(name=warehouse.name, lat=warehouse.lat, lng=warehouse.lng)]
@@ -560,7 +629,9 @@ class OrderDialog(QDialog):
             customer = entry.customer
             if customer.lat is None or customer.lng is None:
                 raise ValueError(
-                    f"Customer '{customer.name}' is missing latitude/longitude. Please update the customer before routing."
+                    tr(
+                        "Customer '{customer_name}' is missing latitude/longitude. Please update the customer before routing."
+                    ).format(customer_name=customer.name)
                 )
             stops.append(Stop(name=customer.name, lat=customer.lat, lng=customer.lng))
             self.stop_index_to_customer[len(stops) - 1] = customer
@@ -568,12 +639,16 @@ class OrderDialog(QDialog):
 
     def estimate_route(self):
         if self.route_thread and self.route_thread.isRunning():
-            QMessageBox.information(self, "Route calculation", "A route calculation is already in progress.")
+            QMessageBox.information(
+                self,
+                tr("Route calculation"),
+                tr("A route calculation is already in progress."),
+            )
             return
         try:
             stops = self._build_stops()
         except Exception as exc:
-            QMessageBox.critical(self, "Error", str(exc))
+            QMessageBox.critical(self, tr("Error"), str(exc))
             return
         if not stops:
             return
@@ -583,7 +658,8 @@ class OrderDialog(QDialog):
         self.route_order = []
         self.export_button.setEnabled(False)
         self.estimate_button.setEnabled(False)
-        self.route_status_label.setText("Calculating route...")
+        self._route_calculating = True
+        self._set_route_status("calculating")
 
         worker = RouteCalculationWorker(stops, return_to_depot=True)
         thread = QThread()
@@ -601,15 +677,20 @@ class OrderDialog(QDialog):
 
     def _on_route_finished(self, result: Optional[RouteResult], error: Optional[BaseException]) -> None:
         self.estimate_button.setEnabled(True)
+        self._route_calculating = False
         if error or result is None:
-            message = str(error) if error else "Unable to compute route."
-            self.route_status_label.setText("Route calculation failed.")
-            QMessageBox.critical(self, "Routing error", message)
+            message = str(error) if error else None
+            self._set_route_status("failed")
+            QMessageBox.critical(
+                self,
+                tr("Routing error"),
+                message or tr("Unable to compute route."),
+            )
             return
 
         self._populate_route_list(result)
         km = result.total_distance_m / 1000 if result.total_distance_m else 0
-        self.route_status_label.setText(f"Route ready — total distance ≈ {km:.2f} km")
+        self._set_route_status("ready", km=km)
         self.export_button.setEnabled(True)
 
     def _populate_route_list(self, result: RouteResult) -> None:
@@ -624,7 +705,7 @@ class OrderDialog(QDialog):
                 continue
             stop = stops[idx]
             if idx == 0:
-                item = QListWidgetItem(f"{stop.name} (Depot)")
+                item = QListWidgetItem(tr("{stop_name} (Depot)").format(stop_name=stop.name))
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             else:
                 item = QListWidgetItem(stop.name)
@@ -641,25 +722,34 @@ class OrderDialog(QDialog):
     def _on_route_thread_finished(self) -> None:
         self.route_worker = None
         self.route_thread = None
-        if self.route_status_label.text() == "Calculating route...":
-            self.route_status_label.clear()
+        if self._route_calculating:
+            self._route_calculating = False
+            self._set_route_status(None)
 
     def export_route(self):
         if not self.current_stops or not self.route_order:
-            QMessageBox.warning(self, "Missing route", "Estimate the route before exporting.")
+            QMessageBox.warning(
+                self,
+                tr("Missing route"),
+                tr("Estimate the route before exporting."),
+            )
             return
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "Export route to Excel",
+            tr("Export route to Excel"),
             "",
-            "Excel files (*.xlsx);;All files (*)",
+            tr("Excel files (*.xlsx);;All files (*)"),
         )
         if not path:
             return
 
         warehouse: Warehouse = self.warehouse_combo.currentData()
         if not warehouse:
-            QMessageBox.warning(self, "Missing warehouse", "Select a warehouse before exporting.")
+            QMessageBox.warning(
+                self,
+                tr("Missing warehouse"),
+                tr("Select a warehouse before exporting."),
+            )
             return
 
         def _customer_key(customer: Customer) -> str:
@@ -696,7 +786,11 @@ class OrderDialog(QDialog):
             )
 
         if not rows:
-            QMessageBox.warning(self, "No route stops", "Add lines and estimate the route before exporting.")
+            QMessageBox.warning(
+                self,
+                tr("No route stops"),
+                tr("Add lines and estimate the route before exporting."),
+            )
             return
 
         order_date = self.order.created_at if (self.order and self.order.created_at) else datetime.now()
@@ -710,20 +804,28 @@ class OrderDialog(QDialog):
                 template_path=DEFAULT_TEMPLATE,
             )
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Export error", str(exc))
+            QMessageBox.critical(self, tr("Export error"), str(exc))
             return
 
-        QMessageBox.information(self, "Export complete", f"Excel file saved to {path}")
+        QMessageBox.information(
+            self,
+            tr("Export complete"),
+            tr("Excel file saved to {path}").format(path=path),
+        )
 
     def export_docx(self):
         if not self.lines:
-            QMessageBox.warning(self, "Missing lines", "Add at least one order line before exporting.")
+            QMessageBox.warning(
+                self,
+                tr("Missing lines"),
+                tr("Add at least one order line before exporting."),
+            )
             return
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "Export pallets to DOCX",
+            tr("Export pallets to DOCX"),
             "",
-            "Word files (*.docx);;All files (*)",
+            tr("Word files (*.docx);;All files (*)"),
         )
         if not path:
             return
@@ -745,28 +847,36 @@ class OrderDialog(QDialog):
                         )
                     )
         except ValueError as exc:
-            QMessageBox.warning(self, "Invalid pallet count", str(exc))
+            QMessageBox.warning(self, tr("Invalid pallet count"), str(exc))
             return
 
         if not pages:
-            QMessageBox.warning(self, "No pallets", "Nothing to export — please enter pallet quantities.")
+            QMessageBox.warning(
+                self,
+                tr("No pallets"),
+                tr("Nothing to export — please enter pallet quantities."),
+            )
             return
 
         try:
             export_pallets_to_docx(Path(path), pages, template_path=DEFAULT_DOCX_TEMPLATE)
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Export error", str(exc))
+            QMessageBox.critical(self, tr("Export error"), str(exc))
             return
 
-        QMessageBox.information(self, "Export complete", f"DOCX file saved to {path}")
+        QMessageBox.information(
+            self,
+            tr("Export complete"),
+            tr("DOCX file saved to {path}").format(path=path),
+        )
 
     def accept(self):
         if not self.lines:
-            QMessageBox.warning(self, "Missing lines", "Add at least one order line.")
+            QMessageBox.warning(self, tr("Missing lines"), tr("Add at least one order line."))
             return
         warehouse: Optional[Warehouse] = self.warehouse_combo.currentData()
         if not warehouse:
-            QMessageBox.warning(self, "Missing warehouse", "Select a warehouse.")
+            QMessageBox.warning(self, tr("Missing warehouse"), tr("Select a warehouse."))
             return
         super().accept()
 
@@ -807,9 +917,17 @@ class OrderDialog(QDialog):
         pallets = entry.pallets
         rounded = int(round(pallets))
         if rounded <= 0:
-            raise ValueError(f"{entry.customer.name} / {entry.item.name}: pallet count must be positive.")
+            raise ValueError(
+                tr("{customer} / {item}: pallet count must be positive.").format(
+                    customer=entry.customer.name,
+                    item=entry.item.name,
+                )
+            )
         if abs(rounded - pallets) > 1e-6:
             raise ValueError(
-                f"{entry.customer.name} / {entry.item.name}: pallet count must be a whole number for DOCX export."
+                tr("{customer} / {item}: pallet count must be a whole number for DOCX export.").format(
+                    customer=entry.customer.name,
+                    item=entry.item.name,
+                )
             )
         return rounded

@@ -9,13 +9,21 @@ from typing import Callable, List, Sequence
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 
+from TruckRouteApp.ui.i18n import i18n, tr
+
 
 class ColumnConfig:
     """Model column definition coupling header text with a value extractor."""
 
-    def __init__(self, header: str, extractor: Callable):
+    def __init__(self, header: str, extractor: Callable, translate: bool = True):
         self.header = header
         self.extractor = extractor
+        self.translate = translate
+
+    def translated_header(self) -> str:
+        if not self.translate:
+            return self.header
+        return tr(self.header)
 
 
 class SQLModelTableModel(QAbstractTableModel):
@@ -28,6 +36,7 @@ class SQLModelTableModel(QAbstractTableModel):
         super().__init__(parent)
         self._columns = list(columns)
         self._rows: List = []
+        i18n.language_changed.connect(self._on_language_changed)
 
     def set_rows(self, rows: Sequence) -> None:
         """Replace the backing data set with the provided rows."""
@@ -61,7 +70,7 @@ class SQLModelTableModel(QAbstractTableModel):
         if role != Qt.ItemDataRole.DisplayRole:
             return None
         if orientation == Qt.Orientation.Horizontal:
-            return self._columns[section].header
+            return self._columns[section].translated_header()
         return section + 1
 
     def get_row(self, index: QModelIndex):
@@ -69,3 +78,7 @@ class SQLModelTableModel(QAbstractTableModel):
             return None
         return self._rows[index.row()]
 
+    def _on_language_changed(self, _language: str) -> None:
+        if self.columnCount() == 0:
+            return
+        self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, self.columnCount() - 1)
