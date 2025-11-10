@@ -60,7 +60,7 @@ def export_pallets_to_docx(
     destination_path = Path(destination)
     destination_path.parent.mkdir(parents=True, exist_ok=True)
 
-    ticket_documents: List[DocumentType] = []
+    ticket_documents: List[Any] = []
     for page in pages:
         document = Document(str(template))
         _replace_placeholders(
@@ -78,35 +78,45 @@ def export_pallets_to_docx(
         )
         ticket_documents.append(document)
 
+    if len(ticket_documents) == 1:
+        ticket_documents[0].save(str(destination_path))
+        return
+    
     final_doc = ticket_documents[0]
+    target_body = final_doc.element.body
+    base_sect_pr = _detach_body_sectpr(target_body)
+    if base_sect_pr is None:
+        raise ValueError("Template is missing section properties.")
+    
     for sub_doc in ticket_documents[1:]:
-        _append_page(final_doc, sub_doc)
+        source_body = sub_doc.element.body
+        _detach_body_sectpr(source_body)
+        
+        last_paragraph = _get_last_paragraph(target_body)
+        if last_paragraph is not None:
+            _add_section_break_to_paragraph(last_paragraph, base_sect_pr)
+        
+        _append_page_children(target_body, source_body)
+    
+    target_body.append(deepcopy(base_sect_pr))
     final_doc.save(str(destination_path))
 
 
-def _append_page(target: DocumentType, source: DocumentType) -> None:
-    """
-    Copy the body content of ``source`` into ``target`` on a new page while keeping the
-    template's section properties as the trailing body element.
-    """
-    target_body = target.element.body
-    sect_pr = _detach_body_sectpr(target_body)
-    target_body.append(_page_break_paragraph())
-    for child in list(source.element.body):
+def _append_page_children(target_body, source_body) -> None:
+    """Copy non-section children from ``source_body`` into ``target_body``."""
+    for child in list(source_body):
         if child.tag.endswith("sectPr"):
             continue
         target_body.append(deepcopy(child))
-    if sect_pr is not None:
-        target_body.append(sect_pr)
 
 
-def _replace_placeholders(document: DocumentType, replacements: Mapping[str, str]) -> None:
+def _replace_placeholders(document: Any, replacements: Mapping[str, str]) -> None:
     for root in _iter_xml_roots(document):
         for placeholder, value in replacements.items():
             _replace_placeholder_in_root(root, placeholder, value)
 
 
-def _iter_xml_roots(document: DocumentType) -> Iterable[Any]:
+def _iter_xml_roots(document: Any) -> Iterable[Any]:
     # Main body
     yield document.element.body
     # Headers/footers per section (if we ever add placeholders there).
@@ -199,18 +209,24 @@ def _detach_body_sectpr(body) -> Any | None:
     return None
 
 
-def _page_break_paragraph():
-    if OxmlElement is None or qn is None:
-        raise ModuleNotFoundError(
-            "python-docx is not installed. Install it with 'pip install python-docx' to export DOCX files."
-        ) from _DOCX_IMPORT_ERROR
-    paragraph = OxmlElement("w:p")
-    run = OxmlElement("w:r")
-    br = OxmlElement("w:br")
-    br.set(qn("w:type"), "page")
-    run.append(br)
-    paragraph.append(run)
-    return paragraph
+def _get_last_paragraph(body: Any) -> Any | None:
+    children = list(body)
+    for child in reversed(children):
+        if child.tag.endswith("p"):
+            return child
+    return None
+
+
+def _add_section_break_to_paragraph(paragraph: Any, base_sect_pr: Any) -> None:
+    """Add a section break with nextPage type to ensure next content starts on a new page."""
+    sect_pr = deepcopy(base_sect_pr)
+    # Set the section type to nextPage to start the next section on a new page
+    type_elem = sect_pr.find(qn("w:type"))
+    if type_elem is None:
+        type_elem = OxmlElement("w:type")
+        sect_pr.insert(0, type_elem)
+    type_elem.set(qn("w:val"), "nextPage")
+    paragraph.append(sect_pr)
 
 
 __all__ = ["PalletDocxPage", "export_pallets_to_docx", "DEFAULT_DOCX_TEMPLATE"]
