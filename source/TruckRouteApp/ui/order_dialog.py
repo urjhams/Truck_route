@@ -32,6 +32,11 @@ from PySide6.QtWidgets import (
 )
 
 from TruckRouteApp.logic.db_access import DatabaseService
+from TruckRouteApp.logic.export_docx import (
+    DEFAULT_DOCX_TEMPLATE,
+    PalletDocxPage,
+    export_pallets_to_docx,
+)
 from TruckRouteApp.logic.export_excel import (
     DEFAULT_TEMPLATE,
     RouteExcelItem,
@@ -293,9 +298,11 @@ class OrderDialog(QDialog):
         actions_layout = QHBoxLayout()
         self.estimate_button = QPushButton("Estimate route", self)
         self.export_button = QPushButton("Export to Excel", self)
+        self.export_docx_button = QPushButton("Export to DOCX", self)
         self.route_status_label = QLabel("", self)
         actions_layout.addWidget(self.estimate_button)
         actions_layout.addWidget(self.export_button)
+        actions_layout.addWidget(self.export_docx_button)
         actions_layout.addStretch()
         actions_layout.addWidget(self.route_status_label)
         preview_layout.addLayout(actions_layout)
@@ -313,6 +320,7 @@ class OrderDialog(QDialog):
         self.remove_line_button.clicked.connect(self.remove_line)
         self.estimate_button.clicked.connect(self.estimate_route)
         self.export_button.clicked.connect(self.export_route)
+        self.export_docx_button.clicked.connect(self.export_docx)
         self.add_line_button.setEnabled(bool(self.customers) and bool(self.items))
 
         self.lines: List[OrderLineEntry] = []
@@ -707,6 +715,51 @@ class OrderDialog(QDialog):
 
         QMessageBox.information(self, "Export complete", f"Excel file saved to {path}")
 
+    def export_docx(self):
+        if not self.lines:
+            QMessageBox.warning(self, "Missing lines", "Add at least one order line before exporting.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export pallets to DOCX",
+            "",
+            "Word files (*.docx);;All files (*)",
+        )
+        if not path:
+            return
+
+        pages: List[PalletDocxPage] = []
+        try:
+            for entry in self.lines:
+                integer_pallets = self._require_integer_pallets(entry)
+                address_1, address_2 = self._split_address(entry.customer.address)
+                for pallet_index in range(1, integer_pallets + 1):
+                    pages.append(
+                        PalletDocxPage(
+                            customer_name=entry.customer.name,
+                            address_line_1=address_1,
+                            address_line_2=address_2,
+                            product_name=entry.item.name,
+                            pallet_index=pallet_index,
+                            pallet_total=integer_pallets,
+                        )
+                    )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid pallet count", str(exc))
+            return
+
+        if not pages:
+            QMessageBox.warning(self, "No pallets", "Nothing to export — please enter pallet quantities.")
+            return
+
+        try:
+            export_pallets_to_docx(Path(path), pages, template_path=DEFAULT_DOCX_TEMPLATE)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Export error", str(exc))
+            return
+
+        QMessageBox.information(self, "Export complete", f"DOCX file saved to {path}")
+
     def accept(self):
         if not self.lines:
             QMessageBox.warning(self, "Missing lines", "Add at least one order line.")
@@ -741,3 +794,22 @@ class OrderDialog(QDialog):
                 )
             )
         return order, order_lines
+
+    @staticmethod
+    def _split_address(address: Optional[str]) -> tuple[str, str]:
+        if not address:
+            return "", ""
+        first, _, second = address.partition(",")
+        return first.strip(), second.strip()
+
+    @staticmethod
+    def _require_integer_pallets(entry: OrderLineEntry) -> int:
+        pallets = entry.pallets
+        rounded = int(round(pallets))
+        if rounded <= 0:
+            raise ValueError(f"{entry.customer.name} / {entry.item.name}: pallet count must be positive.")
+        if abs(rounded - pallets) > 1e-6:
+            raise ValueError(
+                f"{entry.customer.name} / {entry.item.name}: pallet count must be a whole number for DOCX export."
+            )
+        return rounded

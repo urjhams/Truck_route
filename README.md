@@ -65,4 +65,14 @@ app = BUNDLE(
 # macOS bundle command: pyinstaller TruckRouteApp.spec --noconfirm --clean
 
 # windows exe: pyinstaller TruckRouteApp.spec --noconfirm --clean
+
+## Additional Dependencies
+
+The new pallet label export relies on [`python-docx`](https://python-docx.readthedocs.io/) to manipulate the Word
+template stored under `source/TruckRouteApp/assets/Template.docx`. Install it in your virtual environment before
+running the UI:
+
+```bash
+pip install python-docx
+```
 ```
