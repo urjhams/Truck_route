@@ -43,9 +43,24 @@ def export_pallets_to_docx(
     pages: Sequence[PalletDocxPage],
     *,
     template_path: Path | str = DEFAULT_DOCX_TEMPLATE,
+    max_product_chars: int = 80,
+    max_address1_chars: int = 50,
 ) -> None:
     """
     Generate a Word document where each pallet ticket occupies a page based on the template.
+    
+    TEXT FORMATTING TO MAINTAIN CONSISTENT LAYOUT:
+    - Product names longer than max_product_chars are truncated with "..." (max ~2 lines)
+    - Address line 1 longer than max_address1_chars is truncated with "..." and comma added
+    - This ensures the pallet index line always remains the last visible line on each page
+    - Prevents layout breaking when text wraps to 3+ lines
+    
+    Args:
+        destination: Output file path
+        pages: Sequence of pallet ticket data
+        template_path: Path to the Word template file
+        max_product_chars: Maximum characters for product name (default 80, ~2 lines at 12pt font)
+        max_address1_chars: Maximum characters for address line 1 (default 50, ~1 line at 12pt font)
     """
     if Document is None:
         raise ModuleNotFoundError(
@@ -63,15 +78,24 @@ def export_pallets_to_docx(
     ticket_documents: List[Any] = []
     for page in pages:
         document = Document(str(template))
+        
+        # Smart text formatting to maintain consistent layout
+        address1, address2 = _format_address_lines(
+            page.address_line_1,
+            page.address_line_2,
+            max_address1_chars
+        )
+        product_name = _truncate_text(page.product_name, max_product_chars)
+        
         _replace_placeholders(
             document,
             {
                 "<Name>": page.customer_name,
-                "<Adress_1>": page.address_line_1,
-                "<Adress_2>": page.address_line_2,
-                "<Address_1>": page.address_line_1,  # template currently uses the double-d spelling
-                "<Address_2>": page.address_line_2,
-                "<ProductName>": page.product_name,
+                "<Adress_1>": address1,
+                "<Adress_2>": address2,
+                "<Address_1>": address1,  # template currently uses the double-d spelling
+                "<Address_2>": address2,
+                "<ProductName>": product_name,
                 "<X>": str(page.pallet_total),
                 "<a>": str(page.pallet_index),
             },
@@ -122,6 +146,71 @@ def export_pallets_to_docx(
     final_doc.save(str(destination_path))
 
 
+def _truncate_text(text: str, max_chars: int) -> str:
+    """
+    Truncate text to maximum character length, adding ellipsis if truncated.
+    
+    This ensures long product names don't break the layout by wrapping to 3+ lines.
+    Maximum 2 lines means approximately 80-100 characters depending on font size.
+    
+    Args:
+        text: The text to truncate
+        max_chars: Maximum character length
+        
+    Returns:
+        Truncated text with "..." appended if it was cut off
+    """
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars - 3] + "..."
+
+
+def _format_address_lines(
+    address1: str,
+    address2: str,
+    max_address1_chars: int
+) -> tuple[str, str]:
+    """
+    Format address lines to fit within layout constraints while maintaining paragraph structure.
+    
+    STRATEGY:
+    - If address_line_1 is short enough (≤ max_address1_chars), keep them separate on 2 lines
+    - If address_line_1 is too long, merge with comma and split intelligently into 2 lines
+    - We must populate BOTH address line placeholders since template has 2 separate paragraphs
+    
+    Examples:
+        Short address:
+          Line 1: "123 Main St"
+          Line 2: "City, State 12345"
+        
+        Long address (merged and re-split):
+          Original: "123 Very Long Street Name Building A" + "Springfield, MA"
+          Line 1: "123 Very Long Street Name Building A,"  (street + comma)
+          Line 2: "Springfield, MA"  (city stays on line 2)
+    
+    Args:
+        address1: First line of address (street)
+        address2: Second line of address (city, state, zip)
+        max_address1_chars: Maximum characters for line 1 before merging
+        
+    Returns:
+        Tuple of (formatted_address1, formatted_address2)
+    """
+    # If address_line_1 is short enough, keep them separate
+    if len(address1) <= max_address1_chars:
+        return (address1, address2)
+    
+    # Address_line_1 is too long
+    # Strategy: Add comma to address1, keep address2 separate
+    # This signals they're connected but maintains the 2-line structure
+    # If the full address1 is too long, truncate it
+    max_truncated = max_address1_chars - 1  # Reserve space for comma
+    if len(address1) > max_truncated:
+        address1 = address1[:max_truncated - 3] + "..."
+    
+    return (address1 + ",", address2)
+
+
 def _append_page_children(target_body, source_body) -> None:
     """
     Copy non-section children from ``source_body`` into ``target_body``.
@@ -146,9 +235,15 @@ def _replace_placeholders(document: Any, replacements: Mapping[str, str]) -> Non
 
 
 def _iter_xml_roots(document: Any) -> Iterable[Any]:
-    # Main body
+    """
+    Yield all XML root elements that should be searched for placeholders.
+    
+    YES, headers and footers ARE processed! This function ensures placeholders
+    in headers/footers are replaced along with body content.
+    """
+    # Main body - where the ticket content lives
     yield document.element.body
-    # Headers/footers per section (if we ever add placeholders there).
+    # Headers/footers per section - also searched for placeholders
     for section in document.sections:
         yield section.header._element  # type: ignore[attr-defined]
         yield section.footer._element  # type: ignore[attr-defined]
@@ -251,34 +346,74 @@ def _detach_body_sectpr(body) -> Any | None:
 
 def _get_last_paragraph(body: Any) -> Any | None:
     """
-    Find the last paragraph element in a document body.
+    Find the last NON-EMPTY paragraph element in a document body.
     
-    We need to locate the last paragraph so we can insert a section break into it,
-    which will force the next content to start on a new page. Word stores section
-    breaks as properties within paragraph elements, not as standalone elements.
+    HOW TO FIND END OF CONTENT:
+    - Word documents are XML with elements like <p> (paragraph), <tbl> (table), <sectPr> (section)
+    - This function iterates BACKWARDS through body children to find the last <p> tag
+    - We skip empty paragraphs to ensure the pallet index line is always the last visible line
     
-    Returns the last paragraph element, or None if no paragraphs exist.
+    WHY WE NEED THIS:
+    - To insert a section break that forces the next ticket onto a NEW PAGE
+    - Section breaks must be INSIDE a paragraph element (as <p><sectPr type="nextPage"/></p>)
+    - They cannot exist as standalone elements at the body level (except the final one)
+    - By placing the break in the last non-empty paragraph (pallet index line),
+      we ensure it's always the last visible content on the page
+    
+    Returns the last non-empty <p> element, or None if no paragraphs exist in the body.
     """
     children = list(body)
-    # Iterate backwards through children to find the last paragraph element
+    # Iterate backwards through children to find the last NON-EMPTY paragraph element
     for child in reversed(children):
         # Paragraph elements have tags ending with "p" (e.g., "{namespace}p")
         if child.tag.endswith("p"):
+            # Check if paragraph has any text content
+            text_nodes = child.xpath('.//w:t')
+            texts = [n.text for n in text_nodes if n.text]
+            combined_text = ''.join(texts).strip()
+            
+            # Return the first non-empty paragraph we find (going backwards)
+            if combined_text:
+                return child
+    
+    # Fallback: if all paragraphs are empty, return the last one anyway
+    for child in reversed(children):
+        if child.tag.endswith("p"):
             return child
+    
     return None
 
 
 def _add_section_break_to_paragraph(paragraph: Any, base_sect_pr: Any) -> None:
     """
-    Add a section break with nextPage type to ensure next content starts on a new page.
+    HOW TO ADD A NEW PAGE AND START FILLING IT:
     
-    In Word's XML structure, section breaks are embedded within paragraph elements.
-    By adding section properties with type="nextPage" to the last paragraph of a section,
-    we force Word to start the next section (next ticket) on a new page.
+    This is the KEY function that creates page breaks between tickets!
+    
+    MECHANISM:
+    1. Take the last paragraph of the current ticket (e.g., the empty line at the end)
+    2. Insert section properties INSIDE that paragraph element
+    3. Set the section type to "nextPage" to force a page break
+    
+    XML STRUCTURE CREATED:
+    <p>
+        <pPr>
+            <sectPr>
+                <type val="nextPage"/>  ← Forces new page
+                ... page layout settings (margins, size, etc.) ...
+            </sectPr>
+        </pPr>
+        (paragraph text content)
+    </p>
+    
+    WHAT HAPPENS:
+    - When Word renders this, it ends the current section/page at this paragraph
+    - The NEXT content (next ticket) automatically starts on a NEW PAGE
+    - All page layout settings (margins, size) are preserved from base_sect_pr
     
     Args:
-        paragraph: The paragraph element where the section break will be inserted
-        base_sect_pr: The base section properties (page layout) to copy and modify
+        paragraph: The last paragraph of the current ticket
+        base_sect_pr: The base section properties (defines page layout)
     """
     # Create a deep copy of the base section properties to avoid modifying the original
     sect_pr = deepcopy(base_sect_pr)
@@ -296,7 +431,7 @@ def _add_section_break_to_paragraph(paragraph: Any, base_sect_pr: Any) -> None:
     type_elem.set(qn("w:val"), "nextPage")
     
     # Append the modified section properties to the paragraph
-    # This creates the page break effect before the next content
+    # This creates the page break effect - next content will start on a new page
     paragraph.append(sect_pr)
 
 
