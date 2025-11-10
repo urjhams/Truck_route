@@ -4,6 +4,7 @@ SQLite bootstrap utilities.
 
 from __future__ import annotations
 
+import shutil
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -45,11 +46,23 @@ def get_engine(db_path: Optional[Path] = None):
     path.parent.mkdir(parents=True, exist_ok=True)
     return create_engine(f"sqlite:///{path}", echo=False)
 
+def _asset_path(name: str) -> Path:
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
+    return base / "assets" / name
+
+def _bootstrap_seed_db(db_path: Path) -> None:
+    if db_path.exists():
+        return
+    seed = _asset_path("truckroute.db")
+    if seed.exists():
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(seed, db_path)
 
 def init_db(db_path: Optional[Path] = None) -> None:
     """
     Create database tables if they do not already exist.
     """
+    _bootstrap_seed_db(db_path := db_path or DEFAULT_DB_PATH)
     engine = get_engine(db_path)
     _run_migrations(engine)
     SQLModel.metadata.create_all(engine)
@@ -172,26 +185,47 @@ def _rebuild_items_table(conn) -> None:
         );
         """
     )
-    # Use COALESCE to support legacy numeric columns.
+    columns = conn.exec_driver_sql('PRAGMA table_info("ITEMS");').fetchall()
+    existing = {row[1].lower() for row in columns}
+
+    select_parts = [
+        "CAST(id AS TEXT) AS id",
+        "name",
+        "ktn_per_pal" if "ktn_per_pal" in existing else "NULL AS ktn_per_pal",
+        (
+            """
+            CASE
+                WHEN items_per_ktn IS NULL THEN NULL
+                ELSE CAST(items_per_ktn AS TEXT)
+            END AS items_per_ktn
+            """.strip()
+            if "items_per_ktn" in existing
+            else "NULL AS items_per_ktn"
+        ),
+        "price_gross" if "price_gross" in existing else "NULL AS price_gross",
+        "price_net" if "price_net" in existing else "NULL AS price_net",
+        (
+            """
+            CASE
+                WHEN tax IS NULL THEN NULL
+                ELSE CAST(tax AS TEXT)
+            END AS tax
+            """.strip()
+            if "tax" in existing
+            else "NULL AS tax"
+        ),
+    ]
+
+    select_clause = ",\n            ".join(select_parts)
+
     conn.exec_driver_sql(
         """
         INSERT INTO __ITEMS_NEW (id, name, ktn_per_pal, items_per_ktn, price_gross, price_net, tax)
         SELECT
-            CAST(id AS TEXT),
-            name,
-            ktn_per_pal,
-            CASE
-                WHEN items_per_ktn IS NULL THEN NULL
-                ELSE CAST(items_per_ktn AS TEXT)
-            END,
-            price_gross,
-            price_net,
-            CASE
-                WHEN tax IS NULL THEN NULL
-                ELSE CAST(tax AS TEXT)
-            END
+            {select_clause}
         FROM ITEMS;
         """
+        .format(select_clause=select_clause)
     )
     conn.exec_driver_sql("DROP TABLE ITEMS;")
     conn.exec_driver_sql('ALTER TABLE __ITEMS_NEW RENAME TO "ITEMS";')
@@ -212,14 +246,21 @@ def _ensure_order_lines_item_id_text(conn) -> None:
     needs_customer_text = customer_meta and (customer_meta[2] or "").upper() != "TEXT"
     needs_item_text = item_meta and (item_meta[2] or "").upper() != "TEXT"
     if not needs_customer_text and not needs_item_text:
+        # Ensure pallets/ktn columns exist even if text conversion not required
+        if "pallets" not in col_meta or "ktn_per_pal" not in col_meta:
+            _rebuild_order_lines_table(conn, convert_text=False)
         return
 
+    _rebuild_order_lines_table(conn, convert_text=True)
+
+
+def _rebuild_order_lines_table(conn, convert_text: bool) -> None:
     conn.exec_driver_sql("PRAGMA foreign_keys=off;")
     conn.exec_driver_sql(
         """
         CREATE TABLE IF NOT EXISTS __ORDER_LINES_NEW (
             id INTEGER PRIMARY KEY,
-            order_id INTEGER REFERENCES ORDERS(id),
+            order_id TEXT REFERENCES ORDERS(id),
             customer_id TEXT REFERENCES CUSTOMERS(id),
             item_id TEXT REFERENCES ITEMS(id),
             pallets REAL NOT NULL DEFAULT 0.0,
@@ -227,10 +268,33 @@ def _ensure_order_lines_item_id_text(conn) -> None:
         );
         """
     )
+    columns = conn.exec_driver_sql('PRAGMA table_info("ORDER_LINES");').fetchall()
+    existing = {row[1].lower() for row in columns}
+
+    order_id_select = (
+        "CAST(order_id AS TEXT) AS order_id" if convert_text else "order_id"
+    )
+    customer_id_select = (
+        "CAST(customer_id AS TEXT) AS customer_id" if convert_text else "customer_id"
+    )
+    item_id_select = (
+        "CAST(item_id AS TEXT) AS item_id" if convert_text else "item_id"
+    )
+    pallets_select = "pallets" if "pallets" in existing else "0.0 AS pallets"
+    ktn_select = (
+        "ktn_per_pal" if "ktn_per_pal" in existing else "NULL AS ktn_per_pal"
+    )
+
     conn.exec_driver_sql(
-        """
+        f"""
         INSERT INTO __ORDER_LINES_NEW (id, order_id, customer_id, item_id, pallets, ktn_per_pal)
-        SELECT id, order_id, CAST(customer_id AS TEXT), CAST(item_id AS TEXT), pallets, ktn_per_pal
+        SELECT
+            id,
+            {order_id_select},
+            {customer_id_select},
+            {item_id_select},
+            {pallets_select},
+            {ktn_select}
         FROM ORDER_LINES;
         """
     )
