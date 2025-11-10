@@ -509,16 +509,31 @@ def _add_section_break_to_paragraph(paragraph: Any, base_sect_pr: Any) -> None:
     sect_pr = deepcopy(base_sect_pr)
     
     # Look for an existing section type element in the section properties
-    type_elem = sect_pr.find(qn("w:type"))
+    # Use qn if available; fall back safely if it's not.
+    type_elem = None
+    if qn is not None:
+        type_elem = sect_pr.find(qn("w:type"))
+    else:
+        # Best-effort fallback: try to find any child that ends with "type"
+        for child in sect_pr:
+            if getattr(child, "tag", "").endswith("type"):
+                type_elem = child
+                break
     
     # If no type element exists, create one and insert it at the beginning
     if type_elem is None:
-        type_elem = OxmlElement("w:type")
+        # Import locally to avoid calling a possibly-None global
+        from docx.oxml import OxmlElement as _OxmlElement
+        
+        type_elem = _OxmlElement("w:type")
         sect_pr.insert(0, type_elem)
     
     # Set the type attribute to "nextPage" which forces a page break
-    # Other options would be "continuous" (no break) or "oddPage"/"evenPage"
-    type_elem.set(qn("w:val"), "nextPage")
+    # Use qn if available, otherwise set the attribute with a fallback name
+    if qn is not None:
+        type_elem.set(qn("w:val"), "nextPage")
+    else:
+        type_elem.set("w:val", "nextPage")
     
     # Append the modified section properties to the paragraph
     # This creates the page break effect - next content will start on a new page
