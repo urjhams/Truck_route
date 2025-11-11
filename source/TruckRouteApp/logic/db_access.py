@@ -82,11 +82,23 @@ class DatabaseService:
             return session.exec(stmt).first() is not None
 
     def delete_customer(self, customer_id: str) -> None:
+        self.delete_customers([customer_id])
+
+    def delete_customers(self, customer_ids: Sequence[str]) -> int:
+        ids = [customer_id for customer_id in customer_ids if customer_id]
+        if not ids:
+            return 0
         with self.session() as session:
-            customer = session.get(Customer, customer_id)
-            if customer:
+            rows = session.exec(
+                select(Customer).where(Customer.id.in_(ids))
+            ).all()
+            deleted = 0
+            for customer in rows:
                 session.delete(customer)
+                deleted += 1
+            if deleted:
                 session.commit()
+            return deleted
 
     # --- Items ----------------------------------------------------------
     def list_items(self) -> List[Item]:
@@ -113,11 +125,23 @@ class DatabaseService:
             return item
 
     def delete_item(self, item_id: str) -> None:
+        self.delete_items([item_id])
+
+    def delete_items(self, item_ids: Sequence[str]) -> int:
+        ids = [item_id for item_id in item_ids if item_id]
+        if not ids:
+            return 0
         with self.session() as session:
-            item = session.get(Item, item_id)
-            if item:
+            rows = session.exec(
+                select(Item).where(Item.id.in_(ids))
+            ).all()
+            deleted = 0
+            for item in rows:
                 session.delete(item)
+                deleted += 1
+            if deleted:
                 session.commit()
+            return deleted
 
     # --- Orders ---------------------------------------------------------
     def list_orders(self) -> List[Order]:

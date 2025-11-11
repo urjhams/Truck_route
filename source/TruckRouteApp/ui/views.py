@@ -7,7 +7,13 @@ from __future__ import annotations
 import csv
 from typing import List, Optional
 
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QPushButton, QHeaderView
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QMessageBox,
+    QPushButton,
+    QHeaderView,
+    QAbstractItemView,
+)
 
 from TruckRouteApp.logic.db_access import DatabaseService
 from TruckRouteApp.models.schema import Customer, Item, Order, Warehouse
@@ -111,6 +117,10 @@ class CustomerView(BaseCrudView):
         ]
         self.model = SQLModelTableModel(columns, self)
         self.set_model(self.model)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        selection_model = self.table.selectionModel()
+        if selection_model:
+            selection_model.selectionChanged.connect(self._update_action_states)
         self.refresh()
 
         header = self.table.horizontalHeader()
@@ -127,11 +137,13 @@ class CustomerView(BaseCrudView):
         self.import_button.clicked.connect(self.import_csv)
         i18n.language_changed.connect(self._apply_translations)
         self._apply_translations()
+        self._update_action_states()
 
     def refresh(self):
         """Refresh the customer list from persistent storage."""
         self.model.set_rows(self.db.list_customers())
         self.table.resizeColumnsToContents()
+        self._update_action_states()
 
     def add(self):
         dialog = CustomerDialog(parent=self)
@@ -154,19 +166,26 @@ class CustomerView(BaseCrudView):
             self.refresh()
 
     def delete(self):
-        index = self.selected_index()
-        if not index:
+        indexes = self.selected_indexes()
+        if not indexes:
             return
-        customer: Optional[Customer] = self.model.get_row(index)
-        if not customer:
+        customers = [
+            self.model.get_row(index)
+            for index in indexes
+            if self.model
+        ]
+        customers = [c for c in customers if c]
+        if not customers:
             return
-        confirm = QMessageBox.question(
-            self,
-            tr("Delete customer"),
-            tr("Delete customer '{name}'?").format(name=customer.name),
-        )
+        if len(customers) == 1:
+            title = tr("Delete customer")
+            message = tr("Delete customer '{name}'?").format(name=customers[0].name)
+        else:
+            title = tr("Delete customers")
+            message = tr("Delete {count} selected customers?").format(count=len(customers))
+        confirm = QMessageBox.question(self, title, message)
         if confirm == QMessageBox.StandardButton.Yes:
-            self.db.delete_customer(customer.id)
+            self.db.delete_customers([customer.id for customer in customers])
             self.refresh()
 
     def import_csv(self):
@@ -239,6 +258,11 @@ class CustomerView(BaseCrudView):
     def _apply_translations(self) -> None:
         self.import_button.setText(tr("Import CSV"))
 
+    def _update_action_states(self, *_args) -> None:
+        selection_count = len(self.selected_indexes())
+        self.edit_button.setEnabled(selection_count == 1)
+        self.delete_button.setEnabled(selection_count >= 1)
+
 
 class ItemView(BaseCrudView):
     """CRUD view for items with optional CSV import into the catalog."""
@@ -257,6 +281,10 @@ class ItemView(BaseCrudView):
         ]
         self.model = SQLModelTableModel(columns, self)
         self.set_model(self.model)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        selection_model = self.table.selectionModel()
+        if selection_model:
+            selection_model.selectionChanged.connect(self._update_action_states)
         self.refresh()
 
         header = self.table.horizontalHeader()
@@ -271,11 +299,13 @@ class ItemView(BaseCrudView):
         self.import_button.clicked.connect(self.import_csv)
         i18n.language_changed.connect(self._apply_translations)
         self._apply_translations()
+        self._update_action_states()
 
     def refresh(self):
         """Refresh the items table with the latest records."""
         self.model.set_rows(self.db.list_items())
         self.table.resizeColumnsToContents()
+        self._update_action_states()
 
     def add(self):
         dialog = ItemDialog(parent=self)
@@ -298,19 +328,26 @@ class ItemView(BaseCrudView):
             self.refresh()
 
     def delete(self):
-        index = self.selected_index()
-        if not index:
+        indexes = self.selected_indexes()
+        if not indexes:
             return
-        item: Optional[Item] = self.model.get_row(index)
-        if not item:
+        items = [
+            self.model.get_row(index)
+            for index in indexes
+            if self.model
+        ]
+        items = [item for item in items if item]
+        if not items:
             return
-        confirm = QMessageBox.question(
-            self,
-            tr("Delete item"),
-            tr("Delete item '{name}'?").format(name=item.name),
-        )
+        if len(items) == 1:
+            title = tr("Delete item")
+            message = tr("Delete item '{name}'?").format(name=items[0].name)
+        else:
+            title = tr("Delete items")
+            message = tr("Delete {count} selected items?").format(count=len(items))
+        confirm = QMessageBox.question(self, title, message)
         if confirm == QMessageBox.StandardButton.Yes:
-            self.db.delete_item(item.id)
+            self.db.delete_items([item.id for item in items])
             self.refresh()
 
     def import_csv(self):
@@ -421,6 +458,11 @@ class ItemView(BaseCrudView):
 
     def _apply_translations(self) -> None:
         self.import_button.setText(tr("Import CSV"))
+
+    def _update_action_states(self, *_args) -> None:
+        selection_count = len(self.selected_indexes())
+        self.edit_button.setEnabled(selection_count == 1)
+        self.delete_button.setEnabled(selection_count >= 1)
 
 
 class OrderView(BaseCrudView):

@@ -4,7 +4,7 @@ Building blocks for CRUD views shared across the desktop UI.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 from PySide6.QtCore import QModelIndex, Qt
 from PySide6.QtWidgets import (
@@ -59,6 +59,16 @@ class BaseCrudView(QWidget):
         if not indexes:
             return None
         return indexes[0]
+
+    def selected_indexes(self) -> List[QModelIndex]:
+        """
+        Return all selected row indexes (may be empty).
+        Useful for multi-select aware actions in subclasses.
+        """
+        selection = self.table.selectionModel()
+        if not selection:
+            return []
+        return selection.selectedRows()
 
     def set_model(self, model: SQLModelTableModel) -> None:
         self.model = model

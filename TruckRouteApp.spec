@@ -72,3 +72,4 @@ app = BUNDLE(
 
 # create environment: python -m venv .venv
 # go to environemt: source .venv/bin/activate
+# on windows: .venv\Scripts\activate
