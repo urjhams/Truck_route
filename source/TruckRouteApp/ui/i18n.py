@@ -178,6 +178,10 @@ TRANSLATIONS.update(
             "en": "Row {idx}: pallet count must be greater than zero.",
             "de": "Zeile {idx}: Palettenmenge muss größer als null sein.",
         },
+        "Row {idx}: karton per pallet is required.": {
+            "en": "Row {idx}: karton per pallet is required.",
+            "de": "Zeile {idx}: Karton pro Palette ist erforderlich.",
+        },
         "Add line": {"en": "Add line", "de": "Position hinzufügen"},
         "Remove line": {"en": "Remove line", "de": "Position entfernen"},
         "Estimate route": {"en": "Estimate route", "de": "Route berechnen"},

@@ -201,6 +201,7 @@ class OrderLineDialog(QDialog):
             "pallets_input": pallets_input,
             "karton_input": karton_input,
         }
+        item_combo.currentIndexChanged.connect(lambda _idx, r=row: self._sync_row_item_defaults(r))
         self._item_rows.append(row)
         self._update_remove_button_state()
         self._apply_row_translations(row)
@@ -236,7 +237,16 @@ class OrderLineDialog(QDialog):
                     tr("Row {idx}: pallet count must be greater than zero.").format(idx=idx)
                 )
                 continue
-            karton = float(karton_text) if karton_text else None
+            default_karton = self._get_item_default_karton(item)
+            if karton_text:
+                karton = float(karton_text)
+            else:
+                if default_karton is None:
+                    errors.append(
+                        tr("Row {idx}: karton per pallet is required.").format(idx=idx)
+                    )
+                    continue
+                karton = default_karton
             lines.append(
                 OrderLineEntry(
                     customer=customer,
@@ -257,9 +267,29 @@ class OrderLineDialog(QDialog):
 
     def _apply_row_translations(self, row: dict[str, QWidget]) -> None:
         pallets_input: QLineEdit = cast(QLineEdit, row["pallets_input"])
-        karton_input: QLineEdit = cast(QLineEdit, row["karton_input"])
         pallets_input.setPlaceholderText(tr("Number of pallets"))
-        karton_input.setPlaceholderText(tr("Karton per pallet"))
+        self._sync_row_item_defaults(row)
+
+    def _sync_row_item_defaults(self, row: dict[str, QWidget]) -> None:
+        item_combo: QComboBox = cast(QComboBox, row["item_combo"])
+        karton_input: QLineEdit = cast(QLineEdit, row["karton_input"])
+        item: Optional[Item] = cast(Optional[Item], item_combo.currentData())
+        placeholder = self._format_karton_placeholder(self._get_item_default_karton(item))
+        karton_input.setPlaceholderText(placeholder)
+
+    @staticmethod
+    def _get_item_default_karton(item: Optional[Item]) -> Optional[float]:
+        if not item or item.ktn_per_pal is None:
+            return None
+        return float(item.ktn_per_pal)
+
+    @staticmethod
+    def _format_karton_placeholder(value: Optional[float]) -> str:
+        if value is None:
+            return tr("Karton per pallet")
+        if float(value).is_integer():
+            return str(int(value))
+        return f"{value:g}"
 
     def _apply_translations(self) -> None:
         self.setWindowTitle(tr("Add Line"))
