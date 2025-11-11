@@ -57,6 +57,10 @@ def _bootstrap_seed_db(db_path: Path) -> None:
     if seed.exists():
         db_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(seed, db_path)
+        return
+    # No bundled seed – create an empty file so SQLModel can initialize schema.
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db_path.touch(exist_ok=True)
 
 def init_db(db_path: Optional[Path] = None) -> None:
     """
