@@ -161,7 +161,7 @@ TRANSLATIONS.update(
         },
         "Add Line": {"en": "Add Line", "de": "Position hinzufügen"},
         "Products": {"en": "Products", "de": "Produkte"},
-        "Product": {"en": "Product", "de": "Produkt"},
+        "Name": {"en": "Name", "de": "Name"},
         "Pallets": {"en": "Pallets", "de": "Paletten"},
         "Karton/Pal": {"en": "Karton/Pal", "de": "Karton/Pal"},
         "Number of pallets": {"en": "Number of pallets", "de": "Anzahl Paletten"},

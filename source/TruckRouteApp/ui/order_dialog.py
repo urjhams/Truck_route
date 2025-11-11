@@ -128,7 +128,7 @@ class OrderLineDialog(QDialog):
         self.products_label = QLabel(self)
         layout.addWidget(self.products_label)
         header_layout = QHBoxLayout()
-        for title, stretch in (("Product", 3), ("Pallets", 1), ("Karton/Pal", 1)):
+        for title, stretch in (("Name", 3), ("Pallets", 1), ("Karton/Pal", 1)):
             label = QLabel(self)
             self._header_labels.append((label, title))
             label.setStyleSheet("font-weight: 600;")
