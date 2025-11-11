@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import sys
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_submodules, collect_dynamic_libs
 
 # App name
 APP_NAME = "Truck Route"
@@ -11,6 +11,7 @@ ENTRYPOINT = "source/TruckRouteApp/main.py"
 
 # Hidden imports (for OR-Tools + SQLModel)
 hidden_imports = collect_submodules("ortools") + collect_submodules("sqlmodel")
+binaries = collect_dynamic_libs("ortools")
 
 # Data files to bundle (src, dest)
 datas = [
@@ -25,7 +26,7 @@ block_cipher = None
 a = Analysis(
     [ENTRYPOINT],
     pathex=["."],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hidden_imports,
     hookspath=[],
@@ -46,7 +47,7 @@ exe = EXE(
     name=APP_NAME,
     icon=None,              # set later .ico/.icns
     console=False,          # GUI app – no terminal window
-    onefile=True
+    onefile=not is_macos,
 )
 
 app = BUNDLE(
