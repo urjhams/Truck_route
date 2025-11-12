@@ -12,11 +12,13 @@ from PySide6.QtCore import QObject, Signal
 LANGUAGE_OPTIONS = [
     ("en", "English"),
     ("de", "German"),
+    ("vi", "Vietnamese"),
+    ("zh", "Mandarin Chinese"),
 ]
 
 
-# Central translation catalog. Keys are the English source phrases used in the UI.
-TRANSLATIONS: Dict[str, Dict[str, str]] = {
+# Base translation catalog (English/German). Additional languages are merged later.
+BASE_TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "Add": {"en": "Add", "de": "Hinzufügen"},
     "Edit": {"en": "Edit", "de": "Bearbeiten"},
     "Delete": {"en": "Delete", "de": "Löschen"},
@@ -42,6 +44,8 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "Language": {"en": "Language", "de": "Sprache"},
     "English": {"en": "English", "de": "Englisch"},
     "German": {"en": "German", "de": "Deutsch"},
+    "Vietnamese": {"en": "Vietnamese", "de": "Vietnamesisch"},
+    "Mandarin Chinese": {"en": "Mandarin Chinese", "de": "Mandarin"},
     "Import error": {"en": "Import error", "de": "Importfehler"},
     "Import CSV": {"en": "Import CSV", "de": "CSV importieren"},
     "Map CSV Columns": {"en": "Map CSV Columns", "de": "CSV-Spalten zuordnen"},
@@ -134,7 +138,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     },
 }
 
-TRANSLATIONS.update(
+BASE_TRANSLATIONS.update(
     {
         "Warehouse": {"en": "Warehouse", "de": "Lager"},
         "Customer": {"en": "Customer", "de": "Kunde"},
@@ -313,6 +317,136 @@ TRANSLATIONS.update(
         },
     }
 )
+
+VI_TRANSLATIONS = {
+    "Add": "Thêm",
+    "Edit": "Chỉnh sửa",
+    "Delete": "Xóa",
+    "Refresh": "Làm mới",
+    "Error": "Lỗi",
+    "Unable to open editor: {details}": "Không thể mở trình chỉnh sửa: {details}",
+    "Truck Route Planner": "Trình lập kế hoạch tuyến xe tải",
+    "Warehouses": "Kho hàng",
+    "Customers": "Khách hàng",
+    "Items": "Sản phẩm",
+    "Orders": "Đơn hàng",
+    "Created": "Đã tạo",
+    "Order": "Đơn hàng",
+    "Export database": "Xuất cơ sở dữ liệu",
+    "Import database": "Nhập cơ sở dữ liệu",
+    "Export failed": "Xuất thất bại",
+    "Import failed": "Nhập thất bại",
+    "Export complete": "Xuất hoàn tất",
+    "Import complete": "Nhập hoàn tất",
+    "Language": "Ngôn ngữ",
+    "English": "Tiếng Anh",
+    "German": "Tiếng Đức",
+    "Vietnamese": "Tiếng Việt",
+    "Mandarin Chinese": "Tiếng Trung (Phổ thông)",
+    "Import error": "Lỗi nhập",
+    "Import CSV": "Nhập CSV",
+    "Map CSV Columns": "Ánh xạ cột CSV",
+    "<Skip>": "<Bỏ qua>",
+    "Select the CSV column for each field. Fields marked * are required.": "Chọn cột CSV cho từng trường. Các trường đánh dấu * là bắt buộc.",
+    "Invalid mapping": "Ánh xạ không hợp lệ",
+    "Field '{field}' is required.": "Trường '{field}' là bắt buộc.",
+    "Column '{column}' is assigned multiple times.": "Cột '{column}' được gán nhiều lần.",
+    "Import customers from CSV": "Nhập khách hàng từ CSV",
+    "Import items from CSV": "Nhập sản phẩm từ CSV",
+    "CSV files (*.csv);;All files (*)": "Tệp CSV (*.csv);;Tất cả tệp (*)",
+    "CSV file must include a header row.": "Tệp CSV phải có dòng tiêu đề.",
+    "missing id": "thiếu ID",
+    "missing name": "thiếu tên",
+    "Delete warehouse": "Xóa kho",
+    "Delete warehouse '{name}'?": "Xóa kho '{name}'?",
+    "Delete customer": "Xóa khách hàng",
+    "Delete customer '{name}'?": "Xóa khách hàng '{name}'?",
+    "Delete item": "Xóa sản phẩm",
+    "Delete item '{name}'?": "Xóa sản phẩm '{name}'?",
+    "Delete order": "Xóa đơn hàng",
+    "Delete order #{order_id}?": "Xóa đơn hàng #{order_id}?",
+    "Update error": "Lỗi cập nhật",
+    "Create order": "Tạo đơn hàng",
+    "View/Edit order": "Xem/Chỉnh sửa đơn hàng",
+    "Unknown": "Không xác định",
+}
+
+ZH_TRANSLATIONS = {
+    "Add": "新增",
+    "Edit": "编辑",
+    "Delete": "删除",
+    "Refresh": "刷新",
+    "Error": "错误",
+    "Unable to open editor: {details}": "无法打开编辑器：{details}",
+    "Truck Route Planner": "卡车路线规划器",
+    "Warehouses": "仓库",
+    "Customers": "客户",
+    "Items": "商品",
+    "Orders": "订单",
+    "Created": "创建时间",
+    "Order": "订单",
+    "Export database": "导出数据库",
+    "Import database": "导入数据库",
+    "Export failed": "导出失败",
+    "Import failed": "导入失败",
+    "Export complete": "导出完成",
+    "Import complete": "导入完成",
+    "Language": "语言",
+    "English": "英语",
+    "German": "德语",
+    "Vietnamese": "越南语",
+    "Mandarin Chinese": "中文（普通话）",
+    "Import error": "导入错误",
+    "Import CSV": "导入 CSV",
+    "Map CSV Columns": "映射 CSV 列",
+    "<Skip>": "<跳过>",
+    "Select the CSV column for each field. Fields marked * are required.": "为每个字段选择 CSV 列。带 * 的字段为必填项。",
+    "Invalid mapping": "映射无效",
+    "Field '{field}' is required.": "字段“{field}”为必填项。",
+    "Column '{column}' is assigned multiple times.": "列“{column}”被重复分配。",
+    "Import customers from CSV": "从 CSV 导入客户",
+    "Import items from CSV": "从 CSV 导入商品",
+    "CSV files (*.csv);;All files (*)": "CSV 文件 (*.csv);;所有文件 (*)",
+    "CSV file must include a header row.": "CSV 文件必须包含表头行。",
+    "missing id": "缺少 ID",
+    "missing name": "缺少名称",
+    "Delete warehouse": "删除仓库",
+    "Delete warehouse '{name}'?": "删除仓库“{name}”？",
+    "Delete customer": "删除客户",
+    "Delete customer '{name}'?": "删除客户“{name}”？",
+    "Delete item": "删除商品",
+    "Delete item '{name}'?": "删除商品“{name}”？",
+    "Delete order": "删除订单",
+    "Delete order #{order_id}?": "删除订单 #{order_id}？",
+    "Update error": "更新错误",
+    "Create order": "创建订单",
+    "View/Edit order": "查看/编辑订单",
+    "Unknown": "未知",
+}
+
+
+SUPPORTED_LANG_CODES = [code for code, _label in LANGUAGE_OPTIONS]
+
+
+def _build_translation_catalog() -> Dict[str, Dict[str, str]]:
+    catalog: Dict[str, Dict[str, str]] = {key: dict(value) for key, value in BASE_TRANSLATIONS.items()}
+
+    def merge(lang_code: str, translations: Dict[str, str]) -> None:
+        for key, text in translations.items():
+            catalog.setdefault(key, {})
+            catalog[key][lang_code] = text
+
+    merge("vi", VI_TRANSLATIONS)
+    merge("zh", ZH_TRANSLATIONS)
+
+    for entry in catalog.values():
+        fallback = entry.get("en") or next(iter(entry.values()))
+        for code in SUPPORTED_LANG_CODES:
+            entry.setdefault(code, fallback)
+    return catalog
+
+
+TRANSLATIONS = _build_translation_catalog()
 
 
 class LanguageManager(QObject):
