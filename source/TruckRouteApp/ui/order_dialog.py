@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Sequence, cast
 from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
+    QCompleter,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -78,6 +79,43 @@ class OrderLineEntry:
     ktn_per_pal: Optional[float] = None
 
 
+class SearchableComboBox(QComboBox):
+    """QComboBox variant that supports substring filtering while typing."""
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        # Allow typing directly into the combo box so the completer has text to work with.
+        self.setEditable(True)
+        # Avoid inserting arbitrary text as new entries; we only want to select existing rows.
+        self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        line_edit = self.lineEdit()
+        if line_edit is not None:
+            # Native clear button is helpful when users want to restart a search quickly.
+            line_edit.setClearButtonEnabled(True)
+            # Each keystroke should refresh the popup to show the filtered list.
+            line_edit.textEdited.connect(self._show_completion_popup)
+        # Ensure the combo always has a completer configured with the right matching rules.
+        self._configure_completer()
+
+    def _configure_completer(self) -> None:
+        completer = self.completer()
+        if completer is None:
+            # Reuse the combo model so the completer sees the same items.
+            completer = QCompleter(self.model(), self)
+            self.setCompleter(completer)
+        # Show a dropdown with matches instead of inline completion.
+        completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        # Make matching case-insensitive and allow searching anywhere in the string.
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchFlag.MatchContains)
+
+    def _show_completion_popup(self, _text: str) -> None:
+        completer = self.completer()
+        if completer is not None:
+            # Force the popup to appear/update immediately with the filtered results.
+            completer.complete()
+
+
 class RouteCalculationWorker(QObject):
     """
     Worker object that performs route optimisation on a background thread.
@@ -119,7 +157,7 @@ class OrderLineDialog(QDialog):
         form = QFormLayout()
         layout.addLayout(form)
         self.customer_label = QLabel(self)
-        self.customer_combo = QComboBox(self)
+        self.customer_combo = SearchableComboBox(self)
         for customer in self.customers:
             self.customer_combo.addItem(customer.name, customer)
         self.customer_combo.setMinimumWidth(260)
@@ -171,7 +209,7 @@ class OrderLineDialog(QDialog):
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(12)
 
-        item_combo = QComboBox(row_widget)
+        item_combo = SearchableComboBox(row_widget)
         for item in self.items:
             item_combo.addItem(item.name, item)
         item_combo.setMinimumWidth(220)
