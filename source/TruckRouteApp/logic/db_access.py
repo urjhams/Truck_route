@@ -20,6 +20,8 @@ from TruckRouteApp.models.schema import Customer, Item, Order, OrderLine, Wareho
 class DatabaseService:
     """
     Convenience layer that centralises CRUD operations for the GUI layer.
+    Every method keeps the UI code free from SQLModel boilerplate and ensures
+    sessions are short-lived (open per action).
     """
 
     def __init__(self, db_path=None):
@@ -27,6 +29,8 @@ class DatabaseService:
 
     @contextmanager
     def session(self) -> Generator[Session, None, None]:
+        # The UI never holds onto sessions directly; instead we expose a
+        # context manager so each action runs in its own transaction.
         with session_context(self._db_path) as session:
             yield session
 
@@ -41,6 +45,8 @@ class DatabaseService:
 
     def save_warehouse(self, warehouse: Warehouse) -> Warehouse:
         with self.session() as session:
+            # ``session.add`` works for both inserts and updates; SQLModel
+            # figures out whether ``warehouse.id`` is already present.
             session.add(warehouse)
             session.commit()
             session.refresh(warehouse)
@@ -97,6 +103,8 @@ class DatabaseService:
                 session.delete(customer)
                 deleted += 1
             if deleted:
+                # Only commit when we actually removed rows so read-only requests
+                # do not bump the write-ahead log unnecessarily.
                 session.commit()
             return deleted
 
@@ -110,6 +118,7 @@ class DatabaseService:
             if item.id is not None:
                 existing = session.get(Item, item.id)
                 if existing:
+                    # Keep updates explicit so only mutable fields change.
                     existing.name = item.name
                     existing.ktn_per_pal = item.ktn_per_pal
                     existing.items_per_ktn = item.items_per_ktn
@@ -159,6 +168,8 @@ class DatabaseService:
     ) -> Order:
         with self.session() as session:
             if order.id is None:
+                # Orders created from the UI do not come with IDs; use the
+                # creation date to generate a sequential daily identifier.
                 order.id = self._generate_order_id(session, order.created_at)
             session.add(order)
             for line in lines:
@@ -184,6 +195,8 @@ class DatabaseService:
             current_lines = session.exec(
                 select(OrderLine).where(OrderLine.order_id == order.id)
             ).all()
+            # Simplest approach: wipe the existing lines and re-create them
+            # from the payload the dialog sends back.
             for line in current_lines:
                 session.delete(line)
 
@@ -223,6 +236,7 @@ class DatabaseService:
                 suffix = value[len(prefix):]
                 if suffix.isdigit():
                     max_suffix = max(max_suffix, int(suffix))
+        # Order IDs produce human-readable batches such as DDMMYYYY1, DDMMYYYY2, ...
         return f"{prefix}{max_suffix + 1}"
 
     # --- Database backup/restore ---------------------------------------
@@ -233,6 +247,8 @@ class DatabaseService:
         """
         dest_path = Path(destination).expanduser().resolve()
         dest_path.parent.mkdir(parents=True, exist_ok=True)
+        # ``copy2`` keeps file metadata intact which makes debugging easier
+        # when users send exported DBs back.
         shutil.copy2(self._db_path, dest_path)
         return dest_path
 
@@ -248,6 +264,8 @@ class DatabaseService:
         destination = self._db_path
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_path, destination)
+        # After copying we still init/migrate to make sure older exports get
+        # patched to the current schema automatically.
         init_db(destination)  # ensure schema/migrations applied
         return destination
 

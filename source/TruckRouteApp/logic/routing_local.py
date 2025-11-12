@@ -58,6 +58,7 @@ def build_distance_matrix(stops: Sequence[Stop]) -> List[List[int]]:
         for j in range(n):
             if i == j:
                 continue
+            # Keep the matrix symmetric so OR-Tools can treat it as an undirected TSP.
             matrix[i][j] = haversine_meters(
                 stops[i].lat,
                 stops[i].lng,
@@ -131,6 +132,7 @@ def optimise_route(stops: Sequence[Stop], return_to_depot: bool = True) -> Route
     if len(stops) < 2:
         raise ValueError("At least a depot and one customer are required to optimise a route.")
 
+    # Avoid feeding nonsense coordinates to OR-Tools – we fail fast instead.
     _validate_coordinates(stops)
 
     distance_matrix = build_distance_matrix(stops)
@@ -149,4 +151,3 @@ __all__ = [
     "haversine_meters",
     "pretty_km",
 ]
-

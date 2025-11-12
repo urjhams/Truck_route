@@ -48,7 +48,7 @@ class CSVMappingDialog(QDialog):
         form = QFormLayout()
         for field, label, required in field_specs:
             combo = QComboBox(self)
-            combo.addItem(tr("<Skip>"), "")
+            combo.addItem(tr("<Skip>"), "")  # first entry lets users skip optional fields
             for header in headers:
                 combo.addItem(header, header)
             combo.setMinimumWidth(260)
@@ -57,6 +57,7 @@ class CSVMappingDialog(QDialog):
             label_widget = QLabel(self)
             self._label_specs[field] = (label_widget, label, required)
             form.addRow(label_widget, combo)
+            # Give each field a sensible default so simple CSVs work with fewer clicks.
             self._auto_select_default(combo, field, label, headers)
 
         layout.addLayout(form)
@@ -92,6 +93,7 @@ class CSVMappingDialog(QDialog):
         for field, combo in self._combos.items():
             column = combo.currentData()
             required = self._required[field]
+            # Required fields must not be skipped; optional ones may return None.
             if required and not column:
                 QMessageBox.warning(
                     self,
@@ -100,6 +102,7 @@ class CSVMappingDialog(QDialog):
                 )
                 return
             if column:
+                # Prevent users from mapping multiple app fields to the same CSV column.
                 if column in used_columns:
                     QMessageBox.warning(
                         self,
@@ -174,6 +177,7 @@ class WarehouseDialog(QDialog):
             if self.exec() != QDialog.DialogCode.Accepted:
                 return None
             try:
+                # Coerce the coordinate fields before saving them back.
                 lat = float(self.lat_edit.text())
                 lng = float(self.lng_edit.text())
             except ValueError:
@@ -257,6 +261,7 @@ class CustomerDialog(QDialog):
             lat_text = self.lat_edit.text().strip()
             lng_text = self.lng_edit.text().strip()
             try:
+                # Allow blank coordinate cells by treating them as ``None``.
                 lat = float(lat_text) if lat_text else None
             except ValueError:
                 QMessageBox.warning(
@@ -375,6 +380,7 @@ class ItemDialog(QDialog):
                 continue
 
             try:
+                # Most spreadsheets store integers as floats, hence ``int(float(...))``.
                 ktn_per_pal = int(self.ktn_per_pal_edit.text()) if self.ktn_per_pal_edit.text().strip() else None
             except ValueError:
                 QMessageBox.warning(

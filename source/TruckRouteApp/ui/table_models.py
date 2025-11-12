@@ -36,6 +36,7 @@ class SQLModelTableModel(QAbstractTableModel):
         super().__init__(parent)
         self._columns = list(columns)
         self._rows: List = []
+        # Whenever the language switches we need to refresh the header captions.
         i18n.language_changed.connect(self._on_language_changed)
 
     def set_rows(self, rows: Sequence) -> None:
@@ -62,6 +63,7 @@ class SQLModelTableModel(QAbstractTableModel):
             col = self._columns[index.column()]
             value = col.extractor(row)
             if isinstance(value, datetime):
+                # Keep timestamps human readable inside the tables.
                 return value.strftime("%Y-%m-%d %H:%M")
             return value
         return None

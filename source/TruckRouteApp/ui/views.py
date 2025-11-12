@@ -28,6 +28,7 @@ def _open_sniffed_reader(fh) -> csv.DictReader:
     sample = fh.read(2048)
     fh.seek(0)
     try:
+        # Inspect the first chunk of the file so we can adapt to ";" vs "," delimited CSVs.
         dialect = csv.Sniffer().sniff(sample, delimiters=";,")
         delimiter = dialect.delimiter
     except Exception:
@@ -62,6 +63,7 @@ class WarehouseView(BaseCrudView):
 
     def refresh(self):
         """Reload the warehouse table from the database."""
+        # Table models are kept lightweight, so we just swap out their rows every time.
         self.model.set_rows(self.db.list_warehouses())
         self.table.resizeColumnsToContents()
 
@@ -201,6 +203,7 @@ class CustomerView(BaseCrudView):
         try:
             with open(path, newline="", encoding="utf-8-sig") as fh:
                 reader = _open_sniffed_reader(fh)
+                # CSVs coming from Excel often have BOMs – ``DictReader`` handles it via ``encoding="utf-8-sig"``.
                 headers = reader.fieldnames
                 if not headers:
                     raise ValueError(tr("CSV file must include a header row."))
@@ -227,6 +230,7 @@ class CustomerView(BaseCrudView):
                     if not any(row.values()):
                         continue
                     try:
+                        # Normalize strings first so validation/duplicates work reliably.
                         id_value = (row.get(id_col) or "").strip()
                         if not id_value:
                             raise ValueError(tr("missing id"))
@@ -250,6 +254,7 @@ class CustomerView(BaseCrudView):
                         customer = Customer(id=id_value, name=name, address=address, lat=lat, lng=lng)
                         self.db.save_customer(customer)
                     except Exception:  # noqa: BLE001
+                        # Invalid rows are ignored silently—showing a modal per issue would be too noisy.
                         continue
                 self.refresh()
         except Exception as exc:  # noqa: BLE001
@@ -396,6 +401,7 @@ class ItemView(BaseCrudView):
                     if not any(row.values()):
                         continue
                     try:
+                        # Leading/trailing whitespace is common in ERP CSVs, so clean every field.
                         id_value = (row.get(id_col) or "").strip()
                         if not id_value:
                             raise ValueError(tr("missing id"))
@@ -506,6 +512,7 @@ class OrderView(BaseCrudView):
         payload = dialog.get_payload()
         if not payload:
             return
+        # ``payload`` always returns a fully-formed Order plus child lines.
         order, lines = payload
         self.db.create_order_with_lines(order, lines)
         self.refresh()

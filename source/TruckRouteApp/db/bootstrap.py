@@ -20,6 +20,9 @@ def get_app_db_path() -> Path:
     - When frozen (PyInstaller exe/app), use OS-specific app data directory.
     - When running from source, use local db/ folder next to source files.
     """
+    # Detect whether we are running as a packaged binary. PyInstaller injects the
+    # ``frozen`` attribute on ``sys`` in that case and our assets live under
+    # OS-specific application data folders.
     if getattr(sys, "frozen", False):  # Bundled app
         base = Path.home()
         if sys.platform == "darwin":
@@ -30,7 +33,7 @@ def get_app_db_path() -> Path:
             base = base / ".local" / "share" / "TruckRoute"
         return base / "truckroute.db"
     else:
-        # Dev mode: local db folder inside repo
+        # Dev mode: place the database within ``source/TruckRouteApp/db`` to simplify debugging.
         return Path(__file__).resolve().parent / "truckroute.db"
 
 
@@ -43,10 +46,14 @@ def get_engine(db_path: Optional[Path] = None):
     Ensures the parent directory exists.
     """
     path = db_path or DEFAULT_DB_PATH
+    # A packaged app might start without the parent folder existing, therefore
+    # we eagerly create it before SQLAlchemy attempts to open the file.
     path.parent.mkdir(parents=True, exist_ok=True)
     return create_engine(f"sqlite:///{path}", echo=False)
 
 def _asset_path(name: str) -> Path:
+    # When frozen ``_MEIPASS`` points to the unpacked temporary bundle
+    # directory. During development it falls back to the repository root.
     base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
     return base / "assets" / name
 
@@ -55,6 +62,7 @@ def _bootstrap_seed_db(db_path: Path) -> None:
         return
     seed = _asset_path("truckroute.db")
     if seed.exists():
+        # Copy the bundled template DB if we shipped one with the binary.
         db_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(seed, db_path)
         return
@@ -66,9 +74,13 @@ def init_db(db_path: Optional[Path] = None) -> None:
     """
     Create database tables if they do not already exist.
     """
+    # 1) Ensure a SQLite file exists (copying a seed DB if packaged)
     _bootstrap_seed_db(db_path := db_path or DEFAULT_DB_PATH)
+    # 2) Build a SQLAlchemy engine bound to that file
     engine = get_engine(db_path)
+    # 3) Apply in-place migrations so legacy installs stay compatible
     _run_migrations(engine)
+    # 4) Let SQLModel create any missing tables.
     SQLModel.metadata.create_all(engine)
 
 
@@ -86,6 +98,8 @@ def _run_migrations(engine) -> None:
     """
     Apply simple, in-place migrations needed for legacy database files.
     """
+    # Every helper below is idempotent; we call them sequentially so partial
+    # upgrades do not leave the schema in an inconsistent state.
     with engine.begin() as conn:
         _ensure_customers_lat_lng_nullable(conn)
         _ensure_items_optional_columns(conn)
@@ -117,6 +131,7 @@ def _ensure_customers_lat_lng_nullable(conn) -> None:
     if not needs_migration and not id_needs_text:
         return
 
+    # Rebuild the table with the relaxed schema while preserving the data.
     conn.exec_driver_sql("PRAGMA foreign_keys=off;")
     conn.exec_driver_sql(
         """
@@ -171,6 +186,8 @@ def _ensure_items_optional_columns(conn) -> None:
     }
     for col_name, col_type in required_columns.items():
         if col_name not in existing:
+            # SQLite supports ``ALTER TABLE ADD COLUMN`` even when the table
+            # already has data, so we can fill in missing optional metadata.
             conn.exec_driver_sql(f'ALTER TABLE "ITEMS" ADD COLUMN {col_name} {col_type};')
 
 
@@ -192,6 +209,7 @@ def _rebuild_items_table(conn) -> None:
     columns = conn.exec_driver_sql('PRAGMA table_info("ITEMS");').fetchall()
     existing = {row[1].lower() for row in columns}
 
+    # Build a SELECT clause that gracefully handles columns missing from older schemas.
     select_parts = [
         "CAST(id AS TEXT) AS id",
         "name",
@@ -318,6 +336,7 @@ def _ensure_order_lines_ktn_column(conn) -> None:
     existing = {row[1].lower() for row in columns}
     if "ktn_per_pal" in existing:
         return
+    # Lightweight migration – add the column in-place so existing rows default to NULL.
     conn.exec_driver_sql('ALTER TABLE "ORDER_LINES" ADD COLUMN ktn_per_pal REAL;')
 
 

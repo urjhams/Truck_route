@@ -204,6 +204,8 @@ class OrderLineDialog(QDialog):
         self._apply_translations()
 
     def _add_item_row(self) -> None:
+        # Each row contains (item dropdown, pallet input, optional carton/pallet input)
+        # so the user can plan multiple SKUs for one customer in one go.
         row_widget = QWidget(self)
         row_layout = QHBoxLayout(row_widget)
         row_layout.setContentsMargins(0, 0, 0, 0)
@@ -260,6 +262,7 @@ class OrderLineDialog(QDialog):
         customer: Customer = self.customer_combo.currentData()
         lines: List[OrderLineEntry] = []
         errors: List[str] = []
+        # Iterate every temporary row and validate the numeric fields before converting.
         for idx, row in enumerate(self._item_rows, start=1):
             # row["item_combo"] is stored as a QWidget in the dict; cast it to QComboBox
             # and cast the returned currentData() to Item so the type checker understands.
@@ -279,6 +282,8 @@ class OrderLineDialog(QDialog):
             if karton_text:
                 karton = float(karton_text)
             else:
+                # If the user left the field blank we fall back to the item default,
+                # but only when the catalog actually has that metadata.
                 if default_karton is None:
                     errors.append(
                         tr("Row {idx}: karton per pallet is required.").format(idx=idx)
@@ -356,6 +361,7 @@ class OrderDialog(QDialog):
 
         main_layout = QVBoxLayout(self)
 
+        # -- Order metadata ----------------------------------------------------
         form = QFormLayout()
         self.warehouse_combo = QComboBox(self)
         for warehouse in self.warehouses:
@@ -364,6 +370,7 @@ class OrderDialog(QDialog):
         form.addRow(self.warehouse_label, self.warehouse_combo)
         main_layout.addLayout(form)
 
+        # -- Order line builder ------------------------------------------------
         line_controls = QHBoxLayout()
         self.add_line_button = QPushButton(self)
         self.remove_line_button = QPushButton(self)
@@ -380,6 +387,7 @@ class OrderDialog(QDialog):
         self.line_table.itemChanged.connect(self._on_line_changed)
         main_layout.addWidget(self.line_table, 3)
 
+        # -- Route preview / export section -----------------------------------
         self.route_list = QListWidget(self)
         self.route_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
         self.route_list.model().rowsMoved.connect(self._on_route_reordered)  # type: ignore[arg-type]
@@ -453,6 +461,8 @@ class OrderDialog(QDialog):
         customers_by_id = {customer.id: customer for customer in self.customers_all if customer.id is not None}
         items_by_id = {item.id: item for item in self.items if item.id is not None}
         missing_references = False
+        # Rehydrate each persisted line, skipping entries whose foreign keys
+        # no longer exist (e.g. deleted customers).
         for record in self.db.list_order_lines(self.order.id):
             customer = customers_by_id.get(record.customer_id)
             item = items_by_id.get(record.item_id)
@@ -476,6 +486,8 @@ class OrderDialog(QDialog):
         self._invalidate_route_preview()
 
     def _invalidate_route_preview(self) -> None:
+        # Whenever order lines change we reset any previously calculated route,
+        # forcing the user to re-run optimisation.
         self.current_stops = []
         self.route_order = []
         self.route_list.clear()
@@ -691,6 +703,7 @@ class OrderDialog(QDialog):
         self.stop_index_to_customer = {}
         seen_ids = set()
         for entry in self.lines:
+            # When a customer appears multiple times we only route to them once.
             if entry.customer.id in seen_ids:
                 continue
             seen_ids.add(entry.customer.id)
@@ -729,6 +742,7 @@ class OrderDialog(QDialog):
         self._route_calculating = True
         self._set_route_status("calculating")
 
+        # Kick OR-Tools off on a background thread so the UI stays responsive.
         worker = RouteCalculationWorker(stops, return_to_depot=True)
         thread = QThread()
         _register_route_thread(thread)
@@ -784,6 +798,7 @@ class OrderDialog(QDialog):
                     | Qt.ItemFlag.ItemIsEnabled
                     | Qt.ItemFlag.ItemIsSelectable
                 )
+                # Maintain a list of stop indices so exports can iterate them later.
                 self.route_order.append(idx)
             self.route_list.addItem(item)
 
@@ -864,6 +879,7 @@ class OrderDialog(QDialog):
         order_date = self.order.created_at if (self.order and self.order.created_at) else datetime.now()
         total_pallets = sum(entry.pallets for entry in self.lines)
         try:
+            # The Excel helper handles template cloning + formatting.
             export_route_to_excel(
                 Path(path),
                 rows,
@@ -971,6 +987,7 @@ class OrderDialog(QDialog):
                     ktn_per_pal=entry.ktn_per_pal,
                 )
             )
+        # The caller decides whether to insert or update; we just package the DTOs.
         return order, order_lines
 
     @staticmethod

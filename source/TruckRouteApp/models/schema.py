@@ -10,6 +10,7 @@ from typing import Optional
 from sqlmodel import Field, SQLModel
 
 class Warehouse(SQLModel, table=True):
+    """Physical depot that acts as the truck's start/end point."""
     __tablename__: str = "WAREHOUSES"
     __tablename__ = "WAREHOUSES"
 
@@ -20,6 +21,7 @@ class Warehouse(SQLModel, table=True):
     lng: float = Field(nullable=False)
 
 class Customer(SQLModel, table=True):
+    """Delivery destination optionally enriched with coordinates."""
     __tablename__: str = "CUSTOMERS"
     __tablename__ = "CUSTOMERS"
 
@@ -30,6 +32,7 @@ class Customer(SQLModel, table=True):
     lng: Optional[float] = Field(default=None, nullable=True)
 
 class Item(SQLModel, table=True):
+    """Product/SKU master data referenced by order lines."""
     __tablename__: str = "ITEMS"
     __tablename__ = "ITEMS"
 
@@ -42,6 +45,7 @@ class Item(SQLModel, table=True):
     tax: Optional[str] = Field(default=None)
 
 class Order(SQLModel, table=True):
+    """Represents one planned trip from a warehouse on a specific day."""
     __tablename__: str = "ORDERS"
     __tablename__ = "ORDERS"
 
@@ -50,6 +54,7 @@ class Order(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
 
 class OrderLine(SQLModel, table=True):
+    """Join-table linking orders, customers, and specific items/pallet volumes."""
     __tablename__: str = "ORDER_LINES"
     __tablename__ = "ORDER_LINES"
 

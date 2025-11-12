@@ -48,6 +48,7 @@ class MainWindow(QMainWindow):
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(12, 12, 12, 12)
         sidebar_layout.setSpacing(12)
+        # -- Language selector -------------------------------------------------
         language_row = QHBoxLayout()
         self.language_label = QLabel(sidebar)
         self.language_combo = QComboBox(sidebar)
@@ -80,6 +81,8 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(splitter)
 
+        # Concrete CRUD widgets (implemented in ``ui.views``) live on the right
+        # hand side; we simply swap their visibility when nav changes.
         self.views = {
             "Warehouses": WarehouseView(self.db_service, self),
             "Customers": CustomerView(self.db_service, self),
@@ -94,6 +97,7 @@ class MainWindow(QMainWindow):
         self.nav_list.setCurrentRow(0)
         self.export_db_button.clicked.connect(self.export_database)
         self.import_db_button.clicked.connect(self.import_database)
+        # Refresh captions when the language toggles at runtime.
         i18n.language_changed.connect(self._apply_translations)
         self._apply_translations()
 
@@ -106,6 +110,7 @@ class MainWindow(QMainWindow):
         if not view_key:
             return
         for name, view in self.views.items():
+            # Only keep one widget visible to avoid input focus confusion.
             view.setVisible(name == view_key)
 
     def export_database(self):
@@ -162,6 +167,8 @@ class MainWindow(QMainWindow):
         for view in self.views.values():
             refresh = getattr(view, "refresh", None)
             if callable(refresh):
+                # Each CRUD widget exposes ``refresh`` so we can rebuild their
+                # models after importing a DB file.
                 refresh()
 
     def _apply_translations(self) -> None:

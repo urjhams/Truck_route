@@ -33,7 +33,7 @@ class BaseCrudView(QWidget):
         self.table = QTableView(self)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table.setSortingEnabled(True)
+        self.table.setSortingEnabled(True)  # give every CRUD grid instant sorting
         self.table.doubleClicked.connect(self._on_double_clicked)
         self.model: SQLModelTableModel = None  # type: ignore
         self.main_layout.addWidget(self.table)
@@ -47,6 +47,7 @@ class BaseCrudView(QWidget):
         self.refresh_button = QPushButton(self)
         for widget in (self.add_button, self.edit_button, self.delete_button, self.refresh_button):
             self.button_bar.addWidget(widget)
+        # Keep captions in sync with the active language.
         i18n.language_changed.connect(self.apply_translations)
         self.apply_translations()
 
