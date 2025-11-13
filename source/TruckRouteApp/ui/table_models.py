@@ -5,7 +5,7 @@ Reusable Qt table-model helpers for adapting SQLModel rows to the UI.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Callable, List, Sequence
+from typing import Any, Callable, List, Sequence
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 
@@ -84,3 +84,26 @@ class SQLModelTableModel(QAbstractTableModel):
         if self.columnCount() == 0:
             return
         self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, self.columnCount() - 1)
+
+    def sort(self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder) -> None:
+        if column < 0 or column >= self.columnCount():
+            return
+        reverse = order == Qt.SortOrder.DescendingOrder
+        column_config = self._columns[column]
+
+        def sort_key(row) -> Any:
+            value = column_config.extractor(row)
+            key = self._sortable_value(value)
+            return key
+
+        self.layoutAboutToBeChanged.emit()
+        self._rows.sort(key=sort_key, reverse=reverse)
+        self.layoutChanged.emit()
+
+    @staticmethod
+    def _sortable_value(value: Any):
+        if value is None:
+            return (1, "")
+        if isinstance(value, str):
+            return (0, value.casefold())
+        return (0, value)

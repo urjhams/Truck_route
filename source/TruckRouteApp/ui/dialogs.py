@@ -213,15 +213,13 @@ class CustomerDialog(QDialog):
         self.setWindowTitle(tr("Customer"))
         self.setMinimumWidth(420)  # widen the dialog for better readability
         self.customer = customer or Customer(name="", lat=0.0, lng=0.0)
+        self._original_id = customer.id if customer else None
         self._labels: List[tuple[QLabel, str]] = []
 
         form = QFormLayout(self)
         self.id_edit = QLineEdit("" if self.customer.id is None else str(self.customer.id), self)
         self.id_edit.setMinimumWidth(200)
-        if self.customer.id is not None:
-            self.id_edit.setReadOnly(True)
-        else:
-            self.id_edit.setPlaceholderText(tr("Required"))
+        self.id_edit.setPlaceholderText(tr("Auto-generated when empty"))
         form.addRow(self._make_label("ID"), self.id_edit)
 
         self.name_edit = QLineEdit(self.customer.name, self)
@@ -250,10 +248,10 @@ class CustomerDialog(QDialog):
         i18n.language_changed.connect(self._apply_translations)
         self._apply_translations()
 
-    def get_data(self) -> Optional[Customer]:
+    def get_data(self) -> Optional[tuple[Customer, Optional[str]]]:
         """
         Display the dialog until the submitted latitude/longitude values are valid.
-        Returns the updated customer or None when cancelled.
+        Returns the updated customer and its original ID (if any), or None when cancelled.
         """
         while True:
             if self.exec() != QDialog.DialogCode.Accepted:
@@ -280,16 +278,12 @@ class CustomerDialog(QDialog):
                 )
                 continue
             id_text = self.id_edit.text().strip()
-            if not id_text and self.customer.id is None:
-                QMessageBox.warning(self, tr("Validation error"), tr("ID is required."))
-                continue
-            if id_text:
-                self.customer.id = id_text
+            self.customer.id = id_text or None
             self.customer.name = self.name_edit.text()
             self.customer.address = self.address_edit.text()
             self.customer.lat = lat
             self.customer.lng = lng
-            return self.customer
+            return self.customer, self._original_id
 
     def _make_label(self, key: str) -> QLabel:
         label = QLabel(self)
@@ -298,9 +292,8 @@ class CustomerDialog(QDialog):
 
     def _apply_translations(self) -> None:
         self.setWindowTitle(tr("Customer"))
-        placeholder = tr("Required")
-        if not self.id_edit.isReadOnly():
-            self.id_edit.setPlaceholderText(placeholder)
+        placeholder = tr("Auto-generated when empty")
+        self.id_edit.setPlaceholderText(placeholder)
         for label, key in self._labels:
             label.setText(tr(key))
 
@@ -313,15 +306,13 @@ class ItemDialog(QDialog):
         self.setWindowTitle(tr("Item"))
         self.setMinimumWidth(460)
         self.item = item or Item(name="")
+        self._original_id = item.id if item else None
         self._labels: List[tuple[QLabel, str]] = []
 
         form = QFormLayout(self)
         self.id_edit = QLineEdit("" if self.item.id is None else str(self.item.id), self)
         self.id_edit.setMinimumWidth(160)
-        if self.item.id is not None:
-            self.id_edit.setReadOnly(True)
-        else:
-            self.id_edit.setPlaceholderText(tr("Required"))
+        self.id_edit.setPlaceholderText(tr("Auto-generated when empty"))
         form.addRow(self._make_label("ID"), self.id_edit)
 
         self.name_edit = QLineEdit(self.item.name, self)
@@ -365,19 +356,16 @@ class ItemDialog(QDialog):
         i18n.language_changed.connect(self._apply_translations)
         self._apply_translations()
 
-    def get_data(self) -> Optional[Item]:
+    def get_data(self) -> Optional[tuple[Item, Optional[str]]]:
         """
         Persist user edits after validating numeric fields.
-        Returns the updated item or None if the dialog was cancelled.
+        Returns the updated item plus its original ID (if any) or None if the dialog was cancelled.
         """
         while True:
             if self.exec() != QDialog.DialogCode.Accepted:
                 return None
 
-            id_text = self.id_edit.text().strip()
-            if not id_text:
-                QMessageBox.warning(self, tr("Validation error"), tr("ID is required."))
-                continue
+            id_text = self.id_edit.text().strip() or None
 
             try:
                 # Most spreadsheets store integers as floats, hence ``int(float(...))``.
@@ -423,7 +411,7 @@ class ItemDialog(QDialog):
             self.item.price_gross = price_gross
             self.item.price_net = price_net
             self.item.tax = tax
-            return self.item
+            return self.item, self._original_id
 
     def _make_label(self, key: str) -> QLabel:
         label = QLabel(self)
@@ -432,7 +420,6 @@ class ItemDialog(QDialog):
 
     def _apply_translations(self) -> None:
         self.setWindowTitle(tr("Item"))
-        if not self.id_edit.isReadOnly():
-            self.id_edit.setPlaceholderText(tr("Required"))
+        self.id_edit.setPlaceholderText(tr("Auto-generated when empty"))
         for label, key in self._labels:
             label.setText(tr(key))

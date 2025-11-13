@@ -149,9 +149,14 @@ class CustomerView(BaseCrudView):
 
     def add(self):
         dialog = CustomerDialog(parent=self)
-        data = dialog.get_data()
-        if data:
-            self.db.save_customer(data)
+        result = dialog.get_data()
+        if result:
+            customer, original_id = result
+            try:
+                self.db.save_customer(customer, original_id=original_id)
+            except ValueError as exc:
+                self._show_customer_error(str(exc))
+                return
             self.refresh()
 
     def edit(self):
@@ -162,9 +167,14 @@ class CustomerView(BaseCrudView):
         if not customer:
             return
         dialog = CustomerDialog(customer=customer, parent=self)
-        data = dialog.get_data()
-        if data:
-            self.db.save_customer(data)
+        result = dialog.get_data()
+        if result:
+            updated, original_id = result
+            try:
+                self.db.save_customer(updated, original_id=original_id or customer.id)
+            except ValueError as exc:
+                self._show_customer_error(str(exc))
+                return
             self.refresh()
 
     def delete(self):
@@ -210,7 +220,7 @@ class CustomerView(BaseCrudView):
                 mapping_dialog = CSVMappingDialog(
                     headers,
                     [
-                        ("id", "ID", True),
+                        ("id", "ID", False),
                         ("name", "Name", True),
                         ("address", "Address", False),
                         ("lat", "Latitude", True),
@@ -221,7 +231,7 @@ class CustomerView(BaseCrudView):
                 mapping = mapping_dialog.get_mapping()
                 if not mapping:
                     return
-                id_col = mapping["id"]
+                id_col = mapping.get("id")
                 name_col = mapping["name"]
                 address_col = mapping.get("address")
                 lat_col = mapping["lat"]
@@ -231,9 +241,7 @@ class CustomerView(BaseCrudView):
                         continue
                     try:
                         # Normalize strings first so validation/duplicates work reliably.
-                        id_value = (row.get(id_col) or "").strip()
-                        if not id_value:
-                            raise ValueError(tr("missing id"))
+                        id_value = (row.get(id_col) or "").strip() if id_col else ""
                         name = (row.get(name_col) or "").strip()
                         if not name:
                             raise ValueError(tr("missing name"))
@@ -251,7 +259,13 @@ class CustomerView(BaseCrudView):
                         address = address_value or None
                         if self.db.customer_exists(name, address):
                             continue
-                        customer = Customer(id=id_value, name=name, address=address, lat=lat, lng=lng)
+                        customer = Customer(
+                            id=id_value or None,
+                            name=name,
+                            address=address,
+                            lat=lat,
+                            lng=lng,
+                        )
                         self.db.save_customer(customer)
                     except Exception:  # noqa: BLE001
                         # Invalid rows are ignored silently—showing a modal per issue would be too noisy.
@@ -267,6 +281,15 @@ class CustomerView(BaseCrudView):
         selection_count = len(self.selected_indexes())
         self.edit_button.setEnabled(selection_count == 1)
         self.delete_button.setEnabled(selection_count >= 1)
+
+    def _show_customer_error(self, code: str) -> None:
+        if code == "duplicate_customer_id":
+            message = tr("Customer ID already exists.")
+        elif code == "customer_not_found":
+            message = tr("Customer record could not be found.")
+        else:
+            message = code
+        QMessageBox.warning(self, tr("Validation error"), message)
 
 
 class ItemView(BaseCrudView):
@@ -314,9 +337,14 @@ class ItemView(BaseCrudView):
 
     def add(self):
         dialog = ItemDialog(parent=self)
-        data = dialog.get_data()
-        if data:
-            self.db.save_item(data)
+        result = dialog.get_data()
+        if result:
+            item, original_id = result
+            try:
+                self.db.save_item(item, original_id=original_id)
+            except ValueError as exc:
+                self._show_item_error(str(exc))
+                return
             self.refresh()
 
     def edit(self):
@@ -327,9 +355,14 @@ class ItemView(BaseCrudView):
         if not item:
             return
         dialog = ItemDialog(item=item, parent=self)
-        data = dialog.get_data()
-        if data:
-            self.db.save_item(data)
+        result = dialog.get_data()
+        if result:
+            updated, original_id = result
+            try:
+                self.db.save_item(updated, original_id=original_id or item.id)
+            except ValueError as exc:
+                self._show_item_error(str(exc))
+                return
             self.refresh()
 
     def delete(self):
@@ -374,7 +407,7 @@ class ItemView(BaseCrudView):
                 mapping_dialog = CSVMappingDialog(
                     headers,
                     [
-                        ("id", "ID", True),
+                        ("id", "ID", False),
                         ("name", "Name", True),
                         ("ktn_per_pal", "KTN per Pal", False),
                         ("items_per_ktn", "Items per KTN", False),
@@ -387,7 +420,7 @@ class ItemView(BaseCrudView):
                 mapping = mapping_dialog.get_mapping()
                 if not mapping:
                     return
-                id_col = mapping["id"]
+                id_col = mapping.get("id")
                 name_col = mapping["name"]
                 ktn_col = mapping.get("ktn_per_pal")
                 items_col = mapping.get("items_per_ktn")
@@ -402,10 +435,8 @@ class ItemView(BaseCrudView):
                         continue
                     try:
                         # Leading/trailing whitespace is common in ERP CSVs, so clean every field.
-                        id_value = (row.get(id_col) or "").strip()
-                        if not id_value:
-                            raise ValueError(tr("missing id"))
-                        item_id = id_value
+                        id_value = (row.get(id_col) or "").strip() if id_col else ""
+                        item_id = id_value or None
                         name = (row.get(name_col) or "").strip()
                         if not name:
                             raise ValueError(tr("missing name"))
@@ -469,6 +500,16 @@ class ItemView(BaseCrudView):
         selection_count = len(self.selected_indexes())
         self.edit_button.setEnabled(selection_count == 1)
         self.delete_button.setEnabled(selection_count >= 1)
+        # Keep import button accessible regardless of selection.
+
+    def _show_item_error(self, code: str) -> None:
+        if code == "duplicate_item_id":
+            message = tr("Item ID already exists.")
+        elif code == "item_not_found":
+            message = tr("Item record could not be found.")
+        else:
+            message = code
+        QMessageBox.warning(self, tr("Validation error"), message)
 
 
 class OrderView(BaseCrudView):

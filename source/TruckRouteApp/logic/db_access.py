@@ -6,12 +6,14 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime
+import re
+import secrets
 import shutil
 from pathlib import Path
-from typing import Generator, List, Optional, Sequence
+from typing import Generator, List, Optional, Sequence, Type
 
 from sqlalchemy import func, cast, String
-from sqlmodel import Session, select, desc
+from sqlmodel import Session, SQLModel, select, desc
 
 from TruckRouteApp.db import DEFAULT_DB_PATH, session_context, init_db
 from TruckRouteApp.models.schema import Customer, Item, Order, OrderLine, Warehouse
@@ -64,8 +66,29 @@ class DatabaseService:
         with self.session() as session:
             return list(session.exec(select(Customer).order_by(Customer.name)).all())
 
-    def save_customer(self, customer: Customer) -> Customer:
+    def save_customer(self, customer: Customer, original_id: Optional[str] = None) -> Customer:
         with self.session() as session:
+            desired_id = (customer.id or "").strip() or None
+            if original_id:
+                db_customer = session.get(Customer, original_id)
+                if not db_customer:
+                    raise ValueError("customer_not_found")
+                new_id = desired_id or self._generate_incremental_id(session, Customer, customer.name, "CUS")
+                if new_id != original_id and session.get(Customer, new_id):
+                    raise ValueError("duplicate_customer_id")
+                db_customer.id = new_id
+                db_customer.name = customer.name
+                db_customer.address = customer.address
+                db_customer.lat = customer.lat
+                db_customer.lng = customer.lng
+                session.commit()
+                session.refresh(db_customer)
+                return db_customer
+
+            new_id = desired_id or self._generate_incremental_id(session, Customer, customer.name, "CUS")
+            if session.get(Customer, new_id):
+                raise ValueError("duplicate_customer_id")
+            customer.id = new_id
             session.add(customer)
             session.commit()
             session.refresh(customer)
@@ -113,21 +136,31 @@ class DatabaseService:
         with self.session() as session:
             return list(session.exec(select(Item).order_by(Item.id)).all())
 
-    def save_item(self, item: Item) -> Item:
+    def save_item(self, item: Item, original_id: Optional[str] = None) -> Item:
         with self.session() as session:
-            if item.id is not None:
-                existing = session.get(Item, item.id)
-                if existing:
-                    # Keep updates explicit so only mutable fields change.
-                    existing.name = item.name
-                    existing.ktn_per_pal = item.ktn_per_pal
-                    existing.items_per_ktn = item.items_per_ktn
-                    existing.price_gross = item.price_gross
-                    existing.price_net = item.price_net
-                    existing.tax = item.tax
-                    session.commit()
-                    session.refresh(existing)
-                    return existing
+            desired_id = (item.id or "").strip() or None
+            if original_id:
+                existing = session.get(Item, original_id)
+                if not existing:
+                    raise ValueError("item_not_found")
+                new_id = desired_id or self._generate_incremental_id(session, Item, item.name, "ITEM")
+                if new_id != original_id and session.get(Item, new_id):
+                    raise ValueError("duplicate_item_id")
+                existing.id = new_id
+                existing.name = item.name
+                existing.ktn_per_pal = item.ktn_per_pal
+                existing.items_per_ktn = item.items_per_ktn
+                existing.price_gross = item.price_gross
+                existing.price_net = item.price_net
+                existing.tax = item.tax
+                session.commit()
+                session.refresh(existing)
+                return existing
+
+            new_id = desired_id or self._generate_incremental_id(session, Item, item.name, "ITEM")
+            if session.get(Item, new_id):
+                raise ValueError("duplicate_item_id")
+            item.id = new_id
             session.add(item)
             session.commit()
             session.refresh(item)
@@ -225,6 +258,32 @@ class DatabaseService:
                     session.delete(line)
                 session.delete(order)
                 session.commit()
+
+    def _generate_incremental_id(
+        self,
+        session: Session,
+        model: Type[SQLModel],
+        name: Optional[str],
+        prefix: str,
+    ) -> str:
+        """
+        Build a readable identifier derived from ``name`` and ensure uniqueness in the table.
+        Falls back to ``prefix`` when the provided name does not contain alphanumerics.
+        """
+        cleaned = re.sub(r"[^A-Z0-9]", "", (name or "").upper())
+        base = (cleaned or prefix).strip() or prefix
+        base = base[:8] or prefix
+        candidate = base
+        suffix = 1
+        while session.get(model, candidate):
+            candidate = f"{base}{suffix:02d}"
+            suffix += 1
+            if suffix > 99:
+                random_chunk = secrets.token_hex(2).upper()
+                keep = max(0, 10 - len(random_chunk))
+                candidate = f"{base[:keep]}{random_chunk}"
+                suffix = 1
+        return candidate
 
     def _generate_order_id(self, session: Session, created_at: datetime) -> str:
         prefix = created_at.strftime("%d%m%Y")
