@@ -15,12 +15,12 @@ try:
     from docx import Document  # type: ignore[import-untyped]
     from docx.document import Document as DocumentType  # type: ignore[import-untyped]
     from docx.oxml import OxmlElement  # type: ignore[import-untyped]
-    from docx.oxml.ns import qn  # type: ignore[import-untyped]
+    from docx.oxml.ns import qn as qualifyName  # type: ignore[import-untyped]
 except ModuleNotFoundError as exc:  # pragma: no cover - dependency optional at runtime
     Document = None  # type: ignore[assignment]
     DocumentType = Any  # type: ignore[assignment]
     OxmlElement = None  # type: ignore[assignment]
-    qn = None  # type: ignore[assignment]
+    qualifyName = None  # type: ignore[assignment]
     _DOCX_IMPORT_ERROR = exc
 else:
     _DOCX_IMPORT_ERROR = None
@@ -522,7 +522,7 @@ def _optimize_section_margins(sect_pr: Any) -> None:
     Args:
         sect_pr: The section properties element to modify
     """
-    if sect_pr is None or OxmlElement is None or qn is None:
+    if sect_pr is None or OxmlElement is None or qualifyName is None:
         return
     
     # Define margin values in twips (1/1440 inch)
@@ -531,11 +531,11 @@ def _optimize_section_margins(sect_pr: Any) -> None:
     ZERO_TWIPS = "0"
     
     # Find or create the page margins element
-    pg_mar = sect_pr.find(qn("w:pgMar"))
+    pg_mar = sect_pr.find(qualifyName("w:pgMar"))
     if pg_mar is None:
         pg_mar = OxmlElement("w:pgMar")
         # Insert after page size if it exists, otherwise at the beginning
-        pg_sz = sect_pr.find(qn("w:pgSz"))
+        pg_sz = sect_pr.find(qualifyName("w:pgSz"))
         if pg_sz is not None:
             pg_sz_index = list(sect_pr).index(pg_sz)
             sect_pr.insert(pg_sz_index + 1, pg_mar)
@@ -543,10 +543,10 @@ def _optimize_section_margins(sect_pr: Any) -> None:
             sect_pr.insert(0, pg_mar)
     
     # Set margin attributes (all measurements in twips)
-    pg_mar.set(qn("w:top"), MARGIN_TWIPS)  # 0.5 inch top margin
-    pg_mar.set(qn("w:bottom"), MARGIN_TWIPS)  # 0.5 inch bottom margin
-    pg_mar.set(qn("w:header"), ZERO_TWIPS)  # No header space
-    pg_mar.set(qn("w:footer"), ZERO_TWIPS)  # No footer space
+    pg_mar.set(qualifyName("w:top"), MARGIN_TWIPS)  # 0.5 inch top margin
+    pg_mar.set(qualifyName("w:bottom"), MARGIN_TWIPS)  # 0.5 inch bottom margin
+    pg_mar.set(qualifyName("w:header"), ZERO_TWIPS)  # No header space
+    pg_mar.set(qualifyName("w:footer"), ZERO_TWIPS)  # No footer space
     # Keep left and right margins as they are in the template
 
 
@@ -587,8 +587,8 @@ def _add_section_break_to_paragraph(paragraph: Any, base_sect_pr: Any) -> None:
     # Look for an existing section type element in the section properties
     # Use qn if available; fall back safely if it's not.
     type_elem = None
-    if qn is not None:
-        type_elem = sect_pr.find(qn("w:type"))
+    if qualifyName is not None:
+        type_elem = sect_pr.find(qualifyName("w:type"))
     else:
         # Best-effort fallback: try to find any child that ends with "type"
         for child in sect_pr:
@@ -606,34 +606,34 @@ def _add_section_break_to_paragraph(paragraph: Any, base_sect_pr: Any) -> None:
     
     # Set the type attribute to "nextPage" which forces a page break
     # Use qn if available, otherwise set the attribute with a fallback name
-    if qn is not None:
-        type_elem.set(qn("w:val"), "nextPage")
+    if qualifyName is not None:
+        type_elem.set(qualifyName("w:val"), "nextPage")
     else:
         type_elem.set("w:val", "nextPage")
     
-    # Section properties must be inside paragraph properties (pPr) to work correctly
-    # First, find or create the pPr element
-    if qn is not None:
-        pPr = paragraph.find(qn("w:pPr"))
+    # Section properties must be inside paragraph properties (paragraphProperties) to work correctly
+    # First, find or create the paragraphProperties element
+    if qualifyName is not None:
+        paragraphProperties = paragraph.find(qualifyName("w:pPr"))
     else:
-        pPr = None
+        paragraphProperties = None
         for child in paragraph:
             if getattr(child, "tag", "").endswith("pPr"):
-                pPr = child
+                paragraphProperties = child
                 break
     
-    if pPr is None:
+    if paragraphProperties is None:
         # Create pPr and insert at the beginning of the paragraph
         if OxmlElement is not None:
-            pPr = OxmlElement("w:pPr")
+            paragraphProperties = OxmlElement("w:pPr")
         else:
             from docx.oxml import OxmlElement as _OxmlElement
-            pPr = _OxmlElement("w:pPr")
-        paragraph.insert(0, pPr)
+            paragraphProperties = _OxmlElement("w:pPr")
+        paragraph.insert(0, paragraphProperties)
     
     # Now append the section properties to pPr (not directly to paragraph)
     # This creates the proper XML structure for Word to recognize the page break
-    pPr.append(sect_pr)
+    paragraphProperties.append(sect_pr)
 
 
 __all__ = ["PalletDocxPage", "export_pallets_to_docx", "DEFAULT_DOCX_TEMPLATE"]
