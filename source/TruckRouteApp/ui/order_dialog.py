@@ -49,6 +49,9 @@ from TruckRouteApp.ui.i18n import i18n, tr
 
 if TYPE_CHECKING:
     from TruckRouteApp.models.schema import Customer, Item, Order, OrderLine, Warehouse
+else:
+    # Runtime access is required for casts and dataclass instantiation.
+    from TruckRouteApp.models.schema import Customer, Item, Order, OrderLine, Warehouse
 
 
 _ACTIVE_ROUTE_THREADS: List[QThread] = []
