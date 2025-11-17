@@ -120,6 +120,13 @@ def export_pallets_to_docx(
     if base_sect_pr is None:
         raise ValueError("Template is missing section properties.")
     
+    # Remove header and footer references from section properties to save space
+    # This prevents empty headers/footers from taking up valuable page real estate
+    _clear_header_footer_references(base_sect_pr)
+    
+    # Optimize margins for better space utilization
+    _optimize_section_margins(base_sect_pr)
+    
     # Remove all empty paragraphs from the first ticket initially
     # We'll add them back strategically for consistent spacing
     _remove_all_empty_paragraphs(target_body)
@@ -476,6 +483,73 @@ def _get_last_paragraph(body: Any) -> Any | None:
     return None
 
 
+def _clear_header_footer_references(sect_pr: Any) -> None:
+    """
+    Remove header and footer references from section properties.
+    
+    This function removes headerReference and footerReference elements from the
+    section properties XML. This ensures that no space is reserved for headers
+    or footers, maximizing the usable content area on each page.
+    
+    Args:
+        sect_pr: The section properties element to modify
+    """
+    if sect_pr is None:
+        return
+    
+    # Find and remove all header and footer references
+    # These are XML elements that link to header/footer parts in the document
+    elements_to_remove = []
+    for child in list(sect_pr):
+        tag = getattr(child, "tag", "")
+        if tag.endswith("headerReference") or tag.endswith("footerReference"):
+            elements_to_remove.append(child)
+    
+    for elem in elements_to_remove:
+        sect_pr.remove(elem)
+
+
+def _optimize_section_margins(sect_pr: Any) -> None:
+    """
+    Optimize margins in section properties for better space utilization.
+    
+    Reduces top and bottom margins to 0.5 inches (720 twips) to provide more
+    space for content while maintaining reasonable padding.
+    Sets header and footer distances to 0 since we don't use them.
+    
+    Note: Word uses "twips" (1/1440 inch) as the unit for margins.
+    
+    Args:
+        sect_pr: The section properties element to modify
+    """
+    if sect_pr is None or OxmlElement is None or qn is None:
+        return
+    
+    # Define margin values in twips (1/1440 inch)
+    # 0.5 inches = 720 twips
+    MARGIN_TWIPS = "720"
+    ZERO_TWIPS = "0"
+    
+    # Find or create the page margins element
+    pg_mar = sect_pr.find(qn("w:pgMar"))
+    if pg_mar is None:
+        pg_mar = OxmlElement("w:pgMar")
+        # Insert after page size if it exists, otherwise at the beginning
+        pg_sz = sect_pr.find(qn("w:pgSz"))
+        if pg_sz is not None:
+            pg_sz_index = list(sect_pr).index(pg_sz)
+            sect_pr.insert(pg_sz_index + 1, pg_mar)
+        else:
+            sect_pr.insert(0, pg_mar)
+    
+    # Set margin attributes (all measurements in twips)
+    pg_mar.set(qn("w:top"), MARGIN_TWIPS)  # 0.5 inch top margin
+    pg_mar.set(qn("w:bottom"), MARGIN_TWIPS)  # 0.5 inch bottom margin
+    pg_mar.set(qn("w:header"), ZERO_TWIPS)  # No header space
+    pg_mar.set(qn("w:footer"), ZERO_TWIPS)  # No footer space
+    # Keep left and right margins as they are in the template
+
+
 def _add_section_break_to_paragraph(paragraph: Any, base_sect_pr: Any) -> None:
     """
     HOW TO ADD A NEW PAGE AND START FILLING IT:
@@ -537,9 +611,29 @@ def _add_section_break_to_paragraph(paragraph: Any, base_sect_pr: Any) -> None:
     else:
         type_elem.set("w:val", "nextPage")
     
-    # Append the modified section properties to the paragraph
-    # This creates the page break effect - next content will start on a new page
-    paragraph.append(sect_pr)
+    # Section properties must be inside paragraph properties (pPr) to work correctly
+    # First, find or create the pPr element
+    if qn is not None:
+        pPr = paragraph.find(qn("w:pPr"))
+    else:
+        pPr = None
+        for child in paragraph:
+            if getattr(child, "tag", "").endswith("pPr"):
+                pPr = child
+                break
+    
+    if pPr is None:
+        # Create pPr and insert at the beginning of the paragraph
+        if OxmlElement is not None:
+            pPr = OxmlElement("w:pPr")
+        else:
+            from docx.oxml import OxmlElement as _OxmlElement
+            pPr = _OxmlElement("w:pPr")
+        paragraph.insert(0, pPr)
+    
+    # Now append the section properties to pPr (not directly to paragraph)
+    # This creates the proper XML structure for Word to recognize the page break
+    pPr.append(sect_pr)
 
 
 __all__ = ["PalletDocxPage", "export_pallets_to_docx", "DEFAULT_DOCX_TEMPLATE"]
