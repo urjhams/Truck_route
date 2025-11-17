@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, cast
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, cast
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtGui import QDoubleValidator
@@ -45,8 +45,10 @@ from TruckRouteApp.logic.export_excel import (
     export_route_to_excel,
 )
 from TruckRouteApp.logic.routing_local import RouteResult, Stop, optimise_route
-from TruckRouteApp.models.schema import Customer, Item, Order, OrderLine, Warehouse
 from TruckRouteApp.ui.i18n import i18n, tr
+
+if TYPE_CHECKING:
+    from TruckRouteApp.models.schema import Customer, Item, Order, OrderLine, Warehouse
 
 
 _ACTIVE_ROUTE_THREADS: List[QThread] = []
