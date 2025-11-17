@@ -475,8 +475,8 @@ class OrderDialog(QDialog):
                 missing_references = True
                 continue
             entry = OrderLineEntry(
-                customer=customer,
-                item=item,
+                customer=cast(Customer, customer),
+                item=cast(Item, item),
                 pallets=record.pallets,
                 ktn_per_pal=record.ktn_per_pal if record.ktn_per_pal is not None else item.ktn_per_pal,
             )
