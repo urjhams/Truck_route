@@ -20,9 +20,10 @@ from openpyxl.drawing.image import Image
 from openpyxl.styles import Border, Side, Alignment
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
+from TruckRouteApp.util import resolve_asset_path
 
-DEFAULT_TEMPLATE = Path(__file__).resolve().parent.parent / "assets" / "template.xlsx"
-DEFAULT_HEADER_IMAGE = Path(__file__).resolve().parent.parent / "assets" / "header_logo.png"
+DEFAULT_TEMPLATE = resolve_asset_path("template.xlsx")
+DEFAULT_HEADER_IMAGE = resolve_asset_path("header_logo.png")
 
 _COLUMN_ITEM_START = 2  # Column B
 _COLUMN_SECONDARY = 8  # Column H

@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence, Any, List
 
+from TruckRouteApp.util import resolve_asset_path
+
 try:
     from docx import Document  # type: ignore[import-untyped]
     from docx.document import Document as DocumentType  # type: ignore[import-untyped]
@@ -23,7 +25,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - dependency optional at 
 else:
     _DOCX_IMPORT_ERROR = None
 
-DEFAULT_DOCX_TEMPLATE = Path(__file__).resolve().parent.parent / "assets" / "Template.docx"
+DEFAULT_DOCX_TEMPLATE = resolve_asset_path("Template.docx")
 
 
 @dataclass(slots=True)

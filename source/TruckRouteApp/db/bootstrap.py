@@ -13,6 +13,7 @@ from typing import Iterator, Optional
 from sqlmodel import Session, SQLModel, create_engine
 
 from TruckRouteApp.models.schema import Customer, Item, Order, OrderLine, Warehouse
+from TruckRouteApp.util import resolve_asset_path
 
 def get_app_db_path() -> Path:
     """
@@ -51,16 +52,10 @@ def get_engine(db_path: Optional[Path] = None):
     path.parent.mkdir(parents=True, exist_ok=True)
     return create_engine(f"sqlite:///{path}", echo=False)
 
-def _asset_path(name: str) -> Path:
-    # When frozen ``_MEIPASS`` points to the unpacked temporary bundle
-    # directory. During development it falls back to the repository root.
-    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
-    return base / "assets" / name
-
 def _bootstrap_seed_db(db_path: Path) -> None:
     if db_path.exists():
         return
-    seed = _asset_path("truckroute.db")
+    seed = resolve_asset_path("truckroute.db")
     if seed.exists():
         # Copy the bundled template DB if we shipped one with the binary.
         db_path.parent.mkdir(parents=True, exist_ok=True)
