@@ -99,9 +99,8 @@ def _add_header_image(worksheet: Worksheet, image_path: Path) -> None:
     Add an image to the header area, starting at column E.
     The image will be positioned above the customer data table.
     """
-    # Convert Path to absolute string for better Windows/PyInstaller compatibility
-    # This avoids Path.exists() issues with _MEIPASS on Windows
-    image_path_str = str(image_path.resolve() if image_path.is_absolute() else image_path.absolute())
+    if not image_path.exists():
+        return
     
     try:
         # Set row heights for the header area (rows 1-3) to be 3 times taller
@@ -110,8 +109,8 @@ def _add_header_image(worksheet: Worksheet, image_path: Path) -> None:
 
         worksheet.row_dimensions[3].height = header_row_height # row 3
         
-        # Create image object - use the string path for better compatibility
-        img = Image(image_path_str)
+        # Create image object
+        img = Image(str(image_path))
 
         # Position the image starting at column E, row 2
         img.anchor = 'E2'  # Start at column E, row 2
@@ -139,14 +138,8 @@ def _add_header_image(worksheet: Worksheet, image_path: Path) -> None:
         # Add the image to the worksheet
         worksheet.add_image(img)
         
-    except FileNotFoundError as e:
-        # Image file not found - this is expected in some cases, silently skip
-        import logging
-        logging.debug(f"Header image not found at {image_path_str}: {e}")
     except Exception as e:
-        # Other errors (e.g., corrupt image, unsupported format) should be logged
-        import logging
-        logging.warning(f"Could not add header image from {image_path_str}: {type(e).__name__}: {e}")
+        print(f"Warning: Could not add header image: {e}")
 
 
 def _clear_data_region(worksheet: Worksheet) -> None:
@@ -413,9 +406,7 @@ def export_route_to_excel(
 
     # Add header image if provided or use default
     image_to_use = header_image_path or DEFAULT_HEADER_IMAGE
-    # Always attempt to add the image - let _add_header_image handle errors internally
-    # This avoids Path.exists() issues on Windows with PyInstaller's _MEIPASS
-    if image_to_use:
+    if image_to_use and image_to_use.exists():
         _add_header_image(worksheet, image_to_use)
     
     workbook.save(output_path)
