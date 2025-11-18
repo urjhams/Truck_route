@@ -81,15 +81,25 @@ class RouteExcelRow:
 
 
 def _load_workbook_from_template(path: Path) -> Tuple[Workbook, Worksheet]:
-    # Create a fresh workbook instead of loading template to avoid duplicate images
-    workbook = Workbook()
-    worksheet = workbook.active
-    if worksheet is None:
-        worksheet = workbook.create_sheet("Route")
+    # Load the template to preserve header image and formatting
+    # The template already has the correct column widths and header image
+    if path.exists():
+        workbook = load_workbook(str(path))
+        worksheet = workbook.active
+        if worksheet is None:
+            worksheet = workbook.worksheets[0]
     else:
-        worksheet.title = "Route"
-    for idx, width in _COLUMN_WIDTHS.items():
-        worksheet.column_dimensions[get_column_letter(idx)].width = width
+        # Fallback: create a fresh workbook if template not found
+        workbook = Workbook()
+        worksheet = workbook.active
+        if worksheet is None:
+            worksheet = workbook.create_sheet("Route")
+        else:
+            worksheet.title = "Route"
+        for idx, width in _COLUMN_WIDTHS.items():
+            worksheet.column_dimensions[get_column_letter(idx)].width = width
+    
+    # Clear only the data region, preserving header images and formatting
     _clear_data_region(worksheet)
     return workbook, worksheet
 
@@ -411,12 +421,11 @@ def export_route_to_excel(
             summary_end_row,
         )
 
-    # Add header image if provided or use default
-    image_to_use = header_image_path or DEFAULT_HEADER_IMAGE
-    # Always attempt to add the image - let _add_header_image handle errors internally
-    # This avoids Path.exists() issues on Windows with PyInstaller's _MEIPASS
-    if image_to_use:
-        _add_header_image(worksheet, image_to_use)
+    # The header image is already in the template, so we don't need to add it manually
+    # This preserves the image across all platforms (macOS, Windows, Linux)
+    # If header_image_path is explicitly provided and different from template, add it
+    if header_image_path and header_image_path != DEFAULT_HEADER_IMAGE:
+        _add_header_image(worksheet, header_image_path)
     
     workbook.save(output_path)
     return output_path
