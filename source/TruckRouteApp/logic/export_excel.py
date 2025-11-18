@@ -81,8 +81,8 @@ class RouteExcelRow:
 
 
 def _load_workbook_from_template(path: Path) -> Tuple[Workbook, Worksheet]:
-    # Create a fresh workbook instead of loading template to avoid duplicate images
-    workbook = Workbook()
+    # Load the template workbook to preserve images and formatting
+    workbook = load_workbook(path)
     worksheet = workbook.active
     if worksheet is None:
         worksheet = workbook.create_sheet("Route")
@@ -404,10 +404,9 @@ def export_route_to_excel(
             summary_end_row,
         )
 
-    # Add header image if provided or use default
-    image_to_use = header_image_path or DEFAULT_HEADER_IMAGE
-    if image_to_use and image_to_use.exists():
-        _add_header_image(worksheet, image_to_use)
+    # Add header image only if explicitly provided (template already has the default image)
+    if header_image_path and header_image_path.exists():
+        _add_header_image(worksheet, header_image_path)
     
     workbook.save(output_path)
     return output_path

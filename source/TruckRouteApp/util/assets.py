@@ -8,7 +8,7 @@ from pathlib import Path
 
 def resolve_asset_path(name: str) -> Path:
     """Return the absolute path to an asset regardless of PyInstaller state."""
-    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
     return base / "assets" / name
 
 
